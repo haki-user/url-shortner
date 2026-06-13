@@ -1,0 +1,15 @@
+.cache/
+bin/
+coverage/
+*.coverprofile
+*.test
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+data/
+tmp/
+docs/tasks
