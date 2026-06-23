@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 
+	analyticsmemory "tinyurl/internal/analytics/adapters/memory"
 	"tinyurl/internal/link/adapters/codegen"
 	"tinyurl/internal/link/adapters/httpapi"
 	"tinyurl/internal/link/adapters/memory"
@@ -17,13 +18,19 @@ func main() {
 
 	repository := memory.NewRepository()
 	idempotencyStore := memory.NewIdempotencyStore()
+	analyticsRecorder := analyticsmemory.NewRedirectEventRecorder()
 	generator := codegen.NewBase62Generator()
 	clock := system.SystemClock{}
 
 	createGeneratedLink := application.NewCreateGeneratedLink(repository, generator, clock, idempotencyStore)
 	redirectLink := application.NewRedirectLink(repository, clock)
 
-	handler := httpapi.NewHandler(createGeneratedLink, redirectLink, baseURL)
+	handler := httpapi.NewHandler(
+		createGeneratedLink,
+		redirectLink,
+		baseURL,
+		httpapi.WithAnalytics(analyticsRecorder, clock),
+	)
 
 	log.Printf("linkd listening on %s", addr)
 

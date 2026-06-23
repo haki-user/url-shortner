@@ -3,10 +3,13 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	analyticsdomain "tinyurl/internal/analytics/domain"
+	analyticsports "tinyurl/internal/analytics/ports"
 	"tinyurl/internal/link/application"
 	"tinyurl/internal/link/domain"
 	"tinyurl/internal/link/ports"
@@ -16,21 +19,47 @@ type Handler struct {
 	createGeneratedLink application.CreateGeneratedLink
 	redirectLink        application.RedirectLink
 	baseURL             string
+	analyticsRecorder   analyticsports.RedirectEventRecorder
+	clock               ports.Clock
+}
+
+type HandlerOption func(*Handler)
+
+func WithAnalytics(
+	recorder analyticsports.RedirectEventRecorder,
+	clock ports.Clock,
+) HandlerOption {
+	return func(h *Handler) {
+		h.analyticsRecorder = recorder
+		h.clock = clock
+	}
 }
 
 func NewHandler(
 	createGeneratedLink application.CreateGeneratedLink,
 	redirectLink application.RedirectLink,
 	baseURL string,
+	options ...HandlerOption,
 ) Handler {
-	return Handler{
+	handler := Handler{
 		createGeneratedLink: createGeneratedLink,
 		redirectLink:        redirectLink,
 		baseURL:             baseURL,
 	}
+
+	for _, option := range options {
+		option(&handler)
+	}
+
+	return handler
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+		h.handleHealth(w, r)
+		return
+	}
+
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/links" {
 		h.handleCreateLink(w, r)
 		return
@@ -92,6 +121,8 @@ func (h Handler) handleRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.recordRedirectEvent(r, code)
+
 	http.Redirect(w, r, result.Destination, http.StatusFound)
 }
 
@@ -146,4 +177,46 @@ func writeJSON(w http.ResponseWriter, statusCode int, value any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		return
 	}
+}
+
+func (h Handler) recordRedirectEvent(r *http.Request, code string) {
+	if h.analyticsRecorder == nil || h.clock == nil {
+		return
+	}
+
+	event, err := analyticsdomain.NewRedirectEvent(
+		code,
+		h.clock.Now(),
+		r.UserAgent(),
+		r.Referer(),
+		clientIPFromRequest(r),
+	)
+	if err != nil {
+		return
+	}
+
+	_ = h.analyticsRecorder.Record(r.Context(), event)
+}
+
+func clientIPFromRequest(r *http.Request) string {
+	if forwardedFor := r.Header.Get("X-Forwarded-For"); forwardedFor != "" {
+		return strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+
+	return host
+}
+
+type healthHTTPResponse struct {
+	Status string `json:"status"`
+}
+
+func (h Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, healthHTTPResponse{
+		Status: "ok",
+	})
 }
