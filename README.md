@@ -47,3 +47,42 @@ Domain and application packages must not import infrastructure-specific packages
 ## Design Reference
 
 See [outputs/tinyurl-system-design.md](../outputs/tinyurl-system-design.md) for the complete target architecture and low-level design.
+
+## Local Smoke Test
+
+Run the service:
+
+```powershell
+& "C:\Program Files\Go\bin\go.exe" run ./cmd/linkd
+```
+
+In another PowerShell window, create a short link:
+
+```powershell
+Invoke-RestMethod -Method Post http://localhost:8080/v1/links `
+  -ContentType "application/json" `
+  -Body '{"destination":"https://example.com","ownerId":"owner-1"}'
+```
+
+The first generated short URL should be:
+
+```text
+http://localhost:8080/1
+```
+
+Verify the redirect without following it:
+
+```powershell
+Invoke-WebRequest http://localhost:8080/1 -MaximumRedirection 0 -SkipHttpErrorCheck
+```
+
+Expected result:
+
+```text
+StatusCode: 302
+Location: https://example.com
+```
+
+## Learning Reference
+
+See the [Go Learning Handbook](docs/learning/go/README.md) for the language mental model, project context, detailed explanations, cheat sheet, and question log built alongside this project.
