@@ -20,6 +20,7 @@ var (
 	ErrUnchangedDestination   = errors.New("unchanged destination")
 	ErrUnchangedExpiration    = errors.New("unchanged expiration")
 	ErrNoExpiration           = errors.New("no expiration")
+	ErrZeroVersion            = errors.New("zero version")
 )
 
 type Link struct {
@@ -246,4 +247,70 @@ func (l *Link) ClearExpiration(at time.Time) error {
 	l.version++
 
 	return nil
+}
+
+func RehydrateLink(
+	code string,
+	destination DestinationURL,
+	ownerID string,
+	status LinkStatus,
+	createdAt time.Time,
+	updatedAt time.Time,
+	expiresAt *time.Time,
+	version uint64,
+) (Link, error) {
+	trimmedCode := strings.TrimSpace(code)
+	if trimmedCode == "" {
+		return Link{}, ErrEmptyCode
+	}
+
+	if destination.IsZero() {
+		return Link{}, ErrZeroDestination
+	}
+
+	trimmedOwnerID := strings.TrimSpace(ownerID)
+	if trimmedOwnerID == "" {
+		return Link{}, ErrEmptyOwnerID
+	}
+
+	if !status.IsValid() {
+		return Link{}, ErrInvalidLinkStatus
+	}
+
+	if createdAt.IsZero() {
+		return Link{}, ErrZeroCreatedAt
+	}
+
+	if updatedAt.IsZero() {
+		return Link{}, ErrZeroUpdatedAt
+	}
+
+	if updatedAt.Before(createdAt) {
+		return Link{}, ErrUpdateBeforeCreatedAt
+	}
+
+	if expiresAt != nil && !expiresAt.After(createdAt) {
+		return Link{}, ErrInvalidExpiresAt
+	}
+
+	if version == 0 {
+		return Link{}, ErrZeroVersion
+	}
+
+	var expiresAtCopy *time.Time
+	if expiresAt != nil {
+		copied := *expiresAt
+		expiresAtCopy = &copied
+	}
+
+	return Link{
+		code:        trimmedCode,
+		destination: destination,
+		ownerID:     trimmedOwnerID,
+		status:      status,
+		createdAt:   createdAt,
+		updatedAt:   updatedAt,
+		expiresAt:   expiresAtCopy,
+		version:     version,
+	}, nil
 }

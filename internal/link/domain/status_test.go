@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestLinkStatusIsValid(t *testing.T) {
 	tests := []struct {
@@ -113,6 +116,44 @@ func TestLinkStatusString(t *testing.T) {
 			actual := tt.status.String()
 			if actual != tt.expected {
 				t.Fatalf("expected %q, got %q", tt.expected, actual)
+			}
+		})
+	}
+}
+
+func TestParseLinkStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		expected    LinkStatus
+		expectedErr error
+	}{
+		{name: "active", value: "active", expected: Active},
+		{name: "disabled", value: "disabled", expected: Disabled},
+		{name: "deleted", value: "deleted", expected: Deleted},
+		{name: "unknown", value: "unknown", expected: Unknown, expectedErr: ErrInvalidLinkStatus},
+		{name: "empty", value: "", expected: Unknown, expectedErr: ErrInvalidLinkStatus},
+		{name: "uppercase active is invalid", value: "Active", expected: Unknown, expectedErr: ErrInvalidLinkStatus},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual, err := ParseLinkStatus(tt.value)
+
+			if actual != tt.expected {
+				t.Fatalf("expected status %v, got %v", tt.expected, actual)
+			}
+
+			if tt.expectedErr == nil {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+
+				return
+			}
+
+			if !errors.Is(err, tt.expectedErr) {
+				t.Fatalf("expected error %v, got %v", tt.expectedErr, err)
 			}
 		})
 	}

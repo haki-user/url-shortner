@@ -1429,6 +1429,300 @@ func TestLinkSetExpirationCopiesInput(t *testing.T) {
 	}
 }
 
+func TestRehydrateLinkRestoresPersistedState(t *testing.T) {
+	destination := DestinationURL{value: "https://example.com"}
+	createdAt := time.Date(2026, 6, 13, 10, 30, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(2 * time.Hour)
+	expiresAt := createdAt.Add(24 * time.Hour)
+
+	link, err := RehydrateLink(
+		"abc123",
+		destination,
+		"owner-1",
+		Disabled,
+		createdAt,
+		updatedAt,
+		&expiresAt,
+		7,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if link.Code() != "abc123" {
+		t.Fatalf("expected code %q, got %q", "abc123", link.Code())
+	}
+
+	if link.Destination() != destination {
+		t.Fatalf("expected destination %q, got %q", destination.String(), link.Destination().String())
+	}
+
+	if link.OwnerID() != "owner-1" {
+		t.Fatalf("expected owner ID %q, got %q", "owner-1", link.OwnerID())
+	}
+
+	if link.Status() != Disabled {
+		t.Fatalf("expected status %v, got %v", Disabled, link.Status())
+	}
+
+	if !link.CreatedAt().Equal(createdAt) {
+		t.Fatalf("expected createdAt %v, got %v", createdAt, link.CreatedAt())
+	}
+
+	if !link.UpdatedAt().Equal(updatedAt) {
+		t.Fatalf("expected updatedAt %v, got %v", updatedAt, link.UpdatedAt())
+	}
+
+	actualExpiresAt := link.ExpiresAt()
+	if actualExpiresAt == nil {
+		t.Fatal("expected expiresAt, got nil")
+	}
+
+	if !actualExpiresAt.Equal(expiresAt) {
+		t.Fatalf("expected expiresAt %v, got %v", expiresAt, *actualExpiresAt)
+	}
+
+	if link.Version() != 7 {
+		t.Fatalf("expected version %d, got %d", uint64(7), link.Version())
+	}
+}
+
+func TestRehydrateLinkAllowsUpdatedAtEqualCreatedAt(t *testing.T) {
+	destination := DestinationURL{value: "https://example.com"}
+	createdAt := time.Date(2026, 6, 13, 10, 30, 0, 0, time.UTC)
+
+	link, err := RehydrateLink(
+		"abc123",
+		destination,
+		"owner-1",
+		Active,
+		createdAt,
+		createdAt,
+		nil,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !link.UpdatedAt().Equal(createdAt) {
+		t.Fatalf("expected updatedAt %v, got %v", createdAt, link.UpdatedAt())
+	}
+}
+
+func TestRehydrateLinkCopiesExpiresAtInput(t *testing.T) {
+	destination := DestinationURL{value: "https://example.com"}
+	createdAt := time.Date(2026, 6, 13, 10, 30, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	expiresAt := createdAt.Add(24 * time.Hour)
+	originalExpiresAt := expiresAt
+
+	link, err := RehydrateLink(
+		"abc123",
+		destination,
+		"owner-1",
+		Active,
+		createdAt,
+		updatedAt,
+		&expiresAt,
+		2,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	expiresAt = expiresAt.Add(48 * time.Hour)
+
+	actualExpiresAt := link.ExpiresAt()
+	if actualExpiresAt == nil {
+		t.Fatal("expected expiresAt, got nil")
+	}
+
+	if !actualExpiresAt.Equal(originalExpiresAt) {
+		t.Fatalf("expected expiresAt %v, got %v", originalExpiresAt, *actualExpiresAt)
+	}
+}
+
+func TestRehydrateLinkRejectsInvalidPersistedState(t *testing.T) {
+	destination := DestinationURL{value: "https://example.com"}
+	createdAt := time.Date(2026, 6, 13, 10, 30, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+	validExpiresAt := createdAt.Add(24 * time.Hour)
+	invalidExpiresAt := createdAt
+
+	tests := []struct {
+		name        string
+		code        string
+		destination DestinationURL
+		ownerID     string
+		status      LinkStatus
+		createdAt   time.Time
+		updatedAt   time.Time
+		expiresAt   *time.Time
+		version     uint64
+		expectedErr error
+	}{
+		{
+			name:        "empty code",
+			code:        "",
+			destination: destination,
+			ownerID:     "owner-1",
+			status:      Active,
+			createdAt:   createdAt,
+			updatedAt:   updatedAt,
+			expiresAt:   &validExpiresAt,
+			version:     1,
+			expectedErr: ErrEmptyCode,
+		},
+		{
+			name:        "zero destination",
+			code:        "abc123",
+			destination: DestinationURL{},
+			ownerID:     "owner-1",
+			status:      Active,
+			createdAt:   createdAt,
+			updatedAt:   updatedAt,
+			expiresAt:   &validExpiresAt,
+			version:     1,
+			expectedErr: ErrZeroDestination,
+		},
+		{
+			name:        "empty owner ID",
+			code:        "abc123",
+			destination: destination,
+			ownerID:     "",
+			status:      Active,
+			createdAt:   createdAt,
+			updatedAt:   updatedAt,
+			expiresAt:   &validExpiresAt,
+			version:     1,
+			expectedErr: ErrEmptyOwnerID,
+		},
+		{
+			name:        "invalid status",
+			code:        "abc123",
+			destination: destination,
+			ownerID:     "owner-1",
+			status:      Unknown,
+			createdAt:   createdAt,
+			updatedAt:   updatedAt,
+			expiresAt:   &validExpiresAt,
+			version:     1,
+			expectedErr: ErrInvalidLinkStatus,
+		},
+		{
+			name:        "zero createdAt",
+			code:        "abc123",
+			destination: destination,
+			ownerID:     "owner-1",
+			status:      Active,
+			createdAt:   time.Time{},
+			updatedAt:   updatedAt,
+			expiresAt:   nil,
+			version:     1,
+			expectedErr: ErrZeroCreatedAt,
+		},
+		{
+			name:        "zero updatedAt",
+			code:        "abc123",
+			destination: destination,
+			ownerID:     "owner-1",
+			status:      Active,
+			createdAt:   createdAt,
+			updatedAt:   time.Time{},
+			expiresAt:   nil,
+			version:     1,
+			expectedErr: ErrZeroUpdatedAt,
+		},
+		{
+			name:        "updatedAt before createdAt",
+			code:        "abc123",
+			destination: destination,
+			ownerID:     "owner-1",
+			status:      Active,
+			createdAt:   createdAt,
+			updatedAt:   createdAt.Add(-time.Nanosecond),
+			expiresAt:   nil,
+			version:     1,
+			expectedErr: ErrUpdateBeforeCreatedAt,
+		},
+		{
+			name:        "expiresAt not after createdAt",
+			code:        "abc123",
+			destination: destination,
+			ownerID:     "owner-1",
+			status:      Active,
+			createdAt:   createdAt,
+			updatedAt:   updatedAt,
+			expiresAt:   &invalidExpiresAt,
+			version:     1,
+			expectedErr: ErrInvalidExpiresAt,
+		},
+		{
+			name:        "zero version",
+			code:        "abc123",
+			destination: destination,
+			ownerID:     "owner-1",
+			status:      Active,
+			createdAt:   createdAt,
+			updatedAt:   updatedAt,
+			expiresAt:   &validExpiresAt,
+			version:     0,
+			expectedErr: ErrZeroVersion,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			link, err := RehydrateLink(
+				tt.code,
+				tt.destination,
+				tt.ownerID,
+				tt.status,
+				tt.createdAt,
+				tt.updatedAt,
+				tt.expiresAt,
+				tt.version,
+			)
+			if !errors.Is(err, tt.expectedErr) {
+				t.Fatalf("expected error %v, got %v", tt.expectedErr, err)
+			}
+
+			if link.Version() != 0 {
+				t.Fatalf("expected zero-value link, got version %d", link.Version())
+			}
+		})
+	}
+}
+
+func TestRehydrateLinkTrimsCodeAndOwnerID(t *testing.T) {
+	destination := DestinationURL{value: "https://example.com"}
+	createdAt := time.Date(2026, 6, 13, 10, 30, 0, 0, time.UTC)
+	updatedAt := createdAt.Add(time.Hour)
+
+	link, err := RehydrateLink(
+		"  abc123  ",
+		destination,
+		"  owner-1  ",
+		Active,
+		createdAt,
+		updatedAt,
+		nil,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if link.Code() != "abc123" {
+		t.Fatalf("expected trimmed code %q, got %q", "abc123", link.Code())
+	}
+
+	if link.OwnerID() != "owner-1" {
+		t.Fatalf("expected trimmed owner ID %q, got %q", "owner-1", link.OwnerID())
+	}
+}
+
 func assertLinkStateUnchanged(
 	t *testing.T,
 	link Link,

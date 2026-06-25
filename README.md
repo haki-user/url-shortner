@@ -83,6 +83,12 @@ StatusCode: 302
 Location: https://example.com
 ```
 
+## Local Postgres
+
+Postgres runs through Docker Compose for local development. The Go service still runs directly on your machine until we containerize the app.
+
+See [Local Postgres Development](docs/development/postgres.md).
+
 ## Learning Reference
 
 See the [Go Learning Handbook](docs/learning/go/README.md) for the language mental model, project context, detailed explanations, cheat sheet, and question log built alongside this project.

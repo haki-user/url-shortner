@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tinyurl-postgres
+    environment:
+      POSTGRES_DB: tinyurl
+      POSTGRES_USER: tinyurl
+      POSTGRES_PASSWORD: tinyurl
+    ports:
+      - "5433:5432"
+    volumes:
+      - tinyurl-postgres-data:/var/lib/postgresql/data
+      - ../../migrations/postgres:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tinyurl -d tinyurl"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  tinyurl-postgres-data:
