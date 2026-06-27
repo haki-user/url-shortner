@@ -55,11 +55,6 @@ func NewHandler(
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
-		h.handleHealth(w, r)
-		return
-	}
-
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/links" {
 		h.handleCreateLink(w, r)
 		return
@@ -209,14 +204,4 @@ func clientIPFromRequest(r *http.Request) string {
 	}
 
 	return host
-}
-
-type healthHTTPResponse struct {
-	Status string `json:"status"`
-}
-
-func (h Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, healthHTTPResponse{
-		Status: "ok",
-	})
 }

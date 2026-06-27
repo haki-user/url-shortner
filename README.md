@@ -100,6 +100,18 @@ service reads operating-system environment variables and does not automatically
 load a `.env` file. Development tooling or the shell must load those values
 before starting the service.
 
+## Health Endpoints
+
+- `GET /healthz` is a liveness check. It returns `200` while the process can
+  serve HTTP and does not check external dependencies.
+- `GET /readyz` is a readiness check. It returns `200` when required storage is
+  available and `503` when the service should not receive traffic.
+
+Readiness checks have a two-second timeout. Health responses use
+`Cache-Control: no-store` so infrastructure does not reuse stale probe results.
+With Postgres storage, stopping Postgres leaves `/healthz` healthy while
+`/readyz` reports `503`; readiness recovers after Postgres reconnects.
+
 ## Local Postgres
 
 Postgres runs through Docker Compose for local development. The Go service still runs directly on your machine until we containerize the app.

@@ -15,6 +15,7 @@ import (
 	analyticspostgres "tinyurl/internal/analytics/adapters/postgres"
 	analyticsports "tinyurl/internal/analytics/ports"
 	"tinyurl/internal/config"
+	"tinyurl/internal/health"
 	"tinyurl/internal/link/adapters/codegen"
 	"tinyurl/internal/link/adapters/httpapi"
 	linkmemory "tinyurl/internal/link/adapters/memory"
@@ -24,6 +25,14 @@ import (
 	linkports "tinyurl/internal/link/ports"
 	storagepostgres "tinyurl/internal/storage/postgres"
 )
+
+type storageDependencies struct {
+	repository        linkports.LinkRepository
+	idempotencyStore  linkports.IdempotencyStore
+	analyticsRecorder analyticsports.RedirectEventRecorder
+	readinessChecker  health.Checker
+	cleanup           func()
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -41,33 +50,40 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	repository, idempotencyStore, analyticsRecorder, cleanup, err := buildStorage(ctx, cfg)
+	storage, err := buildStorage(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("build storage: %w", err)
 	}
-	defer cleanup()
+	defer storage.cleanup()
 
 	generator := codegen.NewBase62Generator()
 	clock := system.SystemClock{}
 
 	createGeneratedLink := application.NewCreateGeneratedLink(
-		repository,
+		storage.repository,
 		generator,
 		clock,
-		idempotencyStore,
+		storage.idempotencyStore,
 	)
-	redirectLink := application.NewRedirectLink(repository, clock)
+	redirectLink := application.NewRedirectLink(storage.repository, clock)
 
-	handler := httpapi.NewHandler(
+	linkHandler := httpapi.NewHandler(
 		createGeneratedLink,
 		redirectLink,
 		cfg.BaseURL,
-		httpapi.WithAnalytics(analyticsRecorder, clock),
+		httpapi.WithAnalytics(storage.analyticsRecorder, clock),
 	)
+
+	healthHandler := health.NewHandler(storage.readinessChecker)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", healthHandler.Liveness)
+	mux.HandleFunc("GET /readyz", healthHandler.Readiness)
+	mux.Handle("/", linkHandler)
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           handler,
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -123,44 +139,57 @@ func run() error {
 	return nil
 }
 
-func buildStorage(ctx context.Context, cfg config.Config) (
-	linkports.LinkRepository,
-	linkports.IdempotencyStore,
-	analyticsports.RedirectEventRecorder,
-	func(),
-	error,
-) {
-
+func buildStorage(
+	ctx context.Context,
+	cfg config.Config,
+) (storageDependencies, error) {
 	switch cfg.Storage {
 	case config.StorageMemory:
 		log.Println("using memory storage")
 
-		return linkmemory.NewRepository(),
-			linkmemory.NewIdempotencyStore(),
-			analyticsmemory.NewRedirectEventRecorder(),
-			func() {},
-			nil
+		return storageDependencies{
+			repository:        linkmemory.NewRepository(),
+			idempotencyStore:  linkmemory.NewIdempotencyStore(),
+			analyticsRecorder: analyticsmemory.NewRedirectEventRecorder(),
+			readinessChecker: health.CheckerFunc(
+				func(context.Context) error {
+					return nil
+				},
+			),
+			cleanup: func() {},
+		}, nil
 
 	case config.StoragePostgres:
 		log.Println("using postgres storage")
 
 		pool, err := storagepostgres.OpenPool(ctx, cfg.DatabaseURL)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("open postgres pool: %w", err)
+			return storageDependencies{}, fmt.Errorf(
+				"open postgres pool: %w",
+				err,
+			)
 		}
 
 		if err := pool.Ping(ctx); err != nil {
 			pool.Close()
-			return nil, nil, nil, nil, fmt.Errorf("ping postgres: %w", err)
+			return storageDependencies{}, fmt.Errorf(
+				"ping postgres: %w",
+				err,
+			)
 		}
 
-		return linkpostgres.NewRepository(pool),
-			linkpostgres.NewIdempotencyStore(pool),
-			analyticspostgres.NewRedirectEventRecorder(pool),
-			pool.Close,
-			nil
+		return storageDependencies{
+			repository:        linkpostgres.NewRepository(pool),
+			idempotencyStore:  linkpostgres.NewIdempotencyStore(pool),
+			analyticsRecorder: analyticspostgres.NewRedirectEventRecorder(pool),
+			readinessChecker:  health.CheckerFunc(pool.Ping),
+			cleanup:           pool.Close,
+		}, nil
 
 	default:
-		return nil, nil, nil, nil, fmt.Errorf("unsupported storage mode: %q", cfg.Storage)
+		return storageDependencies{}, fmt.Errorf(
+			"unsupported storage mode: %q",
+			cfg.Storage,
+		)
 	}
 }

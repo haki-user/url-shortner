@@ -751,8 +751,103 @@ handler := NewHandler(
    ```go
    for _, option := range options {
        option(&handler) // 👈 This executes the closure returned in step 1!
-   }
-   ```
+    }
+    ```
+
+## Why Is `http.ResponseWriter` an Interface Instead of a Pointer?
+
+The HTTP server owns a concrete mutable response object. Internally, it creates
+an explicit pointer and passes that pointer as an interface:
+
+```go
+response := &internalResponse{}
+
+var writer http.ResponseWriter = response
+handler.ServeHTTP(writer, request)
+```
+
+The interface does not create a pointer automatically. Its dynamic value happens
+to be the `*internalResponse` pointer supplied by the server. Passing the
+interface to another function copies the interface value, but both copies still
+refer to the same response object.
+
+Handlers accept the interface instead of the concrete pointer because they only
+need three capabilities:
+
+```go
+type ResponseWriter interface {
+    Header() http.Header
+    WriteHeader(statusCode int)
+    Write(body []byte) (int, error)
+}
+```
+
+This boundary allows production HTTP implementations, test response recorders,
+and middleware wrappers to provide different concrete response types. A
+`*http.ResponseWriter` would merely add a redundant pointer to the interface;
+the concrete pointer is already stored inside the interface value.
+
+No response is returned because the writer streams headers and body bytes to
+the server-owned network response. Streaming avoids constructing the entire
+response body in memory before sending it.
+
+## What Is the Function Adapter Pattern?
+
+The problem comes first: an API expects a value with a method, but we only have
+a plain function with matching parameters.
+
+```text
+API expects: handler.ServeHTTP(w, r)
+We have:     hello(w, r)
+```
+
+A **function adapter** converts the function into the method-based shape
+required by the interface. It adds no business behavior; its method only
+forwards the call.
+
+```go
+type HandlerFunc func(http.ResponseWriter, *http.Request)
+
+func (f HandlerFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    f(w, r)
+}
+```
+
+`HandlerFunc` is a named function type, not a function declaration. Go permits
+methods on locally defined named types, including function types. Since
+`HandlerFunc` has the required method, it implicitly satisfies `http.Handler`:
+
+```go
+var _ http.Handler = HandlerFunc(nil) // compile-time assertion
+```
+
+An ordinary function can now be adapted:
+
+```go
+func hello(w http.ResponseWriter, r *http.Request) {
+    _, _ = w.Write([]byte("hello"))
+}
+
+handler := http.HandlerFunc(hello)
+```
+
+The complete flow is:
+
+```text
+plain function
+    -> convert to HandlerFunc
+    -> HandlerFunc provides ServeHTTP
+    -> value satisfies http.Handler
+```
+
+This lets one API accept both stateful structs and small functions through the
+same interface. The `CheckerFunc` readiness design used the same pattern to
+adapt `pool.Ping` into a `Checker`.
+
+Do not add this adapter automatically. If the consumer can accept a function
+directly, a function field is simpler. Use the adapter when an existing
+interface boundary genuinely needs both function and object-style
+implementations.
 
 ## How Does the Server Stop?
 
@@ -794,8 +889,8 @@ converted to `nil`.
 Stopping the Postgres container does not stop the application. Existing or new
 database operations fail while Postgres is unavailable. The application keeps
 listening, and the connection pool may reconnect after Postgres returns.
-`/healthz` currently does not test database availability; a separate readiness
-check is needed.
+`/healthz` remains `200` because the process is alive, while `/readyz` returns
+`503` until Postgres becomes available again.
 
 ### When Graceful Shutdown Cannot Run
 
