@@ -112,6 +112,22 @@ Readiness checks have a two-second timeout. Health responses use
 With Postgres storage, stopping Postgres leaves `/healthz` healthy while
 `/readyz` reports `503`; readiness recovers after Postgres reconnects.
 
+## Link Management
+
+Read the current owner-facing state and version of a link:
+
+```http
+GET /v1/links/{code}
+X-Owner-ID: owner-1
+```
+
+A successful response includes status, timestamps, expiration, and version,
+plus an `ETag` such as `"1"`. The response does not expose the owner ID. Missing
+identity returns `401`; a missing link or ownership mismatch returns `404`.
+
+`X-Owner-ID` is only a local-development stand-in. Production identity must
+come from verified authentication or a trusted gateway.
+
 ## Local Postgres
 
 Postgres runs through Docker Compose for local development. The Go service still runs directly on your machine until we containerize the app.

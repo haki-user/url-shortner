@@ -849,6 +849,62 @@ directly, a function field is simpler. Use the adapter when an existing
 interface boundary genuinely needs both function and object-style
 implementations.
 
+## Why Do Management Reads Return a Version and `ETag`?
+
+TinyURL has two different kinds of reads:
+
+- `GET /{code}` is public redirect traffic. It only needs to decide whether the
+  link can redirect and return its destination.
+- `GET /v1/links/{code}` is an owner management read. It returns the current
+  status, expiration, and version needed to safely edit the link.
+
+The version prevents one update from accidentally overwriting another:
+
+```text
+Tab A reads version 1
+Tab B reads version 1
+Tab A disables the link       -> stored version becomes 2
+Tab B updates using version 1 -> rejected as stale
+```
+
+HTTP exposes the resource version using an `ETag` response header:
+
+```http
+ETag: "1"
+```
+
+The client sends that value back when mutating the link:
+
+```http
+If-Match: "1"
+```
+
+`If-Match` means: apply this change only if the stored resource still has the
+version I previously read. The repository enforces the same rule with an
+optimistic update:
+
+```sql
+update links
+set status = $1, version = version + 1
+where code = $2 and version = $3;
+```
+
+If no row is updated, another request changed the link first. The service
+returns a precondition/version-conflict response instead of losing data. This
+strategy is called **optimistic concurrency control** because requests proceed
+without locking the row while the user thinks, then verify the version at write
+time.
+
+An owner header such as `X-Owner-ID` is only a temporary local-development
+stand-in. A production service must derive owner identity from verified
+authentication or a trusted gateway, not trust a client-supplied owner header.
+
+Ownership is checked in the application use case rather than only in the HTTP
+handler. HTTP is one adapter; future gRPC or job adapters must enforce the same
+rule. The adapter extracts identity and maps errors to HTTP responses, while the
+application layer decides whether that identity may access the link. Ownership
+mismatches return `404` to avoid revealing that another owner's code exists.
+
 ## How Does the Server Stop?
 
 The server waits for one of two events:
