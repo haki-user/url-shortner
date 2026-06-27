@@ -949,6 +949,38 @@ both fields or neither field, then delegates the one requested operation to its
 application use case. An explicitly empty destination reaches domain URL
 validation and returns `400`.
 
+### Why Does Expiration Use `json.RawMessage`?
+
+Expiration needs three states:
+
+```text
+expiresAt omitted       -> do not change expiration
+expiresAt timestamp     -> set expiration
+expiresAt null          -> clear expiration
+```
+
+A `*time.Time` field cannot distinguish omitted from explicit `null`; both
+decode to `nil`. `json.RawMessage` preserves the original JSON token as bytes:
+
+```go
+type request struct {
+    ExpiresAt json.RawMessage `json:"expiresAt"`
+}
+```
+
+```text
+field omitted  -> nil RawMessage
+null           -> bytes containing "null"
+timestamp      -> bytes containing the quoted timestamp
+```
+
+The HTTP adapter checks whether the raw field exists, interprets `null`, or
+decodes an RFC 3339 timestamp. It then calls the expiration application use
+case. Inside that use case, `ExpiresAt == nil` unambiguously means clear,
+because the adapter only invokes the use case when the JSON field was present.
+Transport-specific JSON representation therefore stays out of the application
+and domain layers.
+
 An owner header such as `X-Owner-ID` is only a temporary local-development
 stand-in. A production service must derive owner identity from verified
 authentication or a trusted gateway, not trust a client-supplied owner header.

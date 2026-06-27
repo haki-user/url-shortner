@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,17 +19,20 @@ type ManagementHandler struct {
 	getManagedLink        application.GetManagedLink
 	changeLinkStatus      application.ChangeLinkStatus
 	changeLinkDestination application.ChangeLinkDestination
+	changeLinkExpiration  application.ChangeLinkExpiration
 }
 
 func NewManagementHandler(
 	getManagedLink application.GetManagedLink,
 	changeLinkStatus application.ChangeLinkStatus,
 	changeLinkDestination application.ChangeLinkDestination,
+	changeLinkExpiration application.ChangeLinkExpiration,
 ) ManagementHandler {
 	return ManagementHandler{
 		getManagedLink:        getManagedLink,
 		changeLinkStatus:      changeLinkStatus,
 		changeLinkDestination: changeLinkDestination,
+		changeLinkExpiration:  changeLinkExpiration,
 	}
 }
 
@@ -68,8 +72,9 @@ func (h ManagementHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchLinkHTTPRequest struct {
-	Status      *string `json:"status"`
-	Destination *string `json:"destination"`
+	Status      *string         `json:"status"`
+	Destination *string         `json:"destination"`
+	ExpiresAt   json.RawMessage `json:"expiresAt"`
 }
 
 func (h ManagementHandler) Patch(w http.ResponseWriter, r *http.Request) {
@@ -97,12 +102,17 @@ func (h ManagementHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if request.Status == nil && request.Destination == nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
+	providedFields := 0
+	if request.Status != nil {
+		providedFields++
 	}
-
-	if request.Status != nil && request.Destination != nil {
+	if request.Destination != nil {
+		providedFields++
+	}
+	if request.ExpiresAt != nil {
+		providedFields++
+	}
+	if providedFields != 1 {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -139,6 +149,23 @@ func (h ManagementHandler) Patch(w http.ResponseWriter, r *http.Request) {
 				ExpectedVersion: expectedVersion,
 			},
 		)
+
+	case request.ExpiresAt != nil:
+		expiresAt, parseErr := parseExpiresAt(request.ExpiresAt)
+		if parseErr != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		link, err = h.changeLinkExpiration.Execute(
+			r.Context(),
+			application.ChangeLinkExpirationRequest{
+				Code:            r.PathValue("code"),
+				OwnerID:         ownerID,
+				ExpiresAt:       expiresAt,
+				ExpectedVersion: expectedVersion,
+			},
+		)
 	}
 
 	if err != nil {
@@ -162,7 +189,9 @@ func writeManagementMutationError(
 		http.Error(w, "precondition failed", http.StatusPreconditionFailed)
 	case errors.Is(err, domain.ErrInvalidTransition),
 		errors.Is(err, domain.ErrDeletedLink),
-		errors.Is(err, domain.ErrUnchangedDestination):
+		errors.Is(err, domain.ErrUnchangedDestination),
+		errors.Is(err, domain.ErrUnchangedExpiration),
+		errors.Is(err, domain.ErrNoExpiration):
 		http.Error(w, "conflict", http.StatusConflict)
 	case errors.Is(err, application.ErrInvalidExpectedVersion),
 		errors.Is(err, domain.ErrInvalidLinkStatus),
@@ -171,6 +200,20 @@ func writeManagementMutationError(
 	default:
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 	}
+}
+
+func parseExpiresAt(value json.RawMessage) (*time.Time, error) {
+	trimmed := bytes.TrimSpace(value)
+	if bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+
+	var expiresAt time.Time
+	if err := json.Unmarshal(trimmed, &expiresAt); err != nil {
+		return nil, err
+	}
+
+	return &expiresAt, nil
 }
 
 func parseIfMatch(value string) (uint64, error) {

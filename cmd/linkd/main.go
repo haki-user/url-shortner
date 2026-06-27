@@ -72,6 +72,10 @@ func run() error {
 		storage.repository,
 		clock,
 	)
+	changeLinkExpiration := application.NewChangeLinkExpiration(
+		storage.repository,
+		clock,
+	)
 
 	linkHandler := httpapi.NewHandler(
 		createGeneratedLink,
@@ -83,6 +87,7 @@ func run() error {
 		getManagedLink,
 		changeLinkStatus,
 		changeLinkDestination,
+		changeLinkExpiration,
 	)
 
 	healthHandler := health.NewHandler(storage.readinessChecker)

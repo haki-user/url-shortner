@@ -161,6 +161,20 @@ return `400`; unchanged destinations or updates to deleted links return `409`.
 A successful update changes future redirects immediately and returns the next
 resource version.
 
+Set or clear expiration through the same versioned PATCH:
+
+```json
+{"expiresAt":"2026-07-01T12:00:00Z"}
+```
+
+```json
+{"expiresAt":null}
+```
+
+An omitted field means no expiration operation, a timestamp sets expiration,
+and `null` clears it. Expiration must be in the future. Setting the same value,
+clearing an absent expiration, or changing a deleted link returns `409`.
+
 ## Local Postgres
 
 Postgres runs through Docker Compose for local development. The Go service still runs directly on your machine until we containerize the app.
