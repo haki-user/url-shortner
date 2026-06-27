@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="650" viewBox="0 0 1400 650" role="img" aria-labelledby="title desc">
+  <title id="title">Versioned cache write prevents stale restoration</title>
+  <desc id="desc">A slow redirect reads version seven, an owner mutation commits and caches version eight, and the late version seven cache fill is rejected.</desc>
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
+    </marker>
+    <style>
+      .title { font: 700 32px Inter, "Segoe UI", sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px Inter, "Segoe UI", sans-serif; fill: #475569; }
+      .lane { font: 700 15px Inter, "Segoe UI", sans-serif; fill: #0f172a; }
+      .copy { font: 400 13px Inter, "Segoe UI", sans-serif; fill: #475569; }
+      .step { font: 700 13px Inter, "Segoe UI", sans-serif; fill: #ffffff; }
+      .event { font: 600 14px Inter, "Segoe UI", sans-serif; fill: #0f172a; }
+      .lifeline { stroke: #cbd5e1; stroke-width: 2; stroke-dasharray: 6 6; }
+      .blue { stroke: #2563eb; stroke-width: 2.5; fill: none; marker-end: url(#arrow-blue); }
+      .purple { stroke: #7c3aed; stroke-width: 2.5; fill: none; marker-end: url(#arrow-purple); }
+      .red { stroke: #dc2626; stroke-width: 2.5; fill: none; stroke-dasharray: 7 5; marker-end: url(#arrow-red); }
+    </style>
+  </defs>
+
+  <rect width="1400" height="650" fill="#ffffff"/>
+  <text x="44" y="54" class="title">The race versioned writes must prevent</text>
+  <text x="44" y="82" class="subtitle">A delete-only or blind cache fill can restore stale data after a successful mutation.</text>
+
+  <rect x="74" y="118" width="238" height="64" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="193" y="145" text-anchor="middle" class="lane">Slow redirect</text>
+  <text x="193" y="166" text-anchor="middle" class="copy">Cache miss path</text>
+
+  <rect x="394" y="118" width="238" height="64" rx="14" fill="#f8fafc" stroke="#64748b" stroke-width="1.5"/>
+  <text x="513" y="145" text-anchor="middle" class="lane">Source of truth</text>
+  <text x="513" y="166" text-anchor="middle" class="copy">Postgres / URL store</text>
+
+  <rect x="714" y="118" width="238" height="64" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+  <text x="833" y="145" text-anchor="middle" class="lane">Owner mutation</text>
+  <text x="833" y="166" text-anchor="middle" class="copy">If-Match version 7</text>
+
+  <rect x="1034" y="118" width="238" height="64" rx="14" fill="#fff7ed" stroke="#f97316" stroke-width="2"/>
+  <text x="1153" y="145" text-anchor="middle" class="lane">Regional Redis</text>
+  <text x="1153" y="166" text-anchor="middle" class="copy">Current version wins</text>
+
+  <line x1="193" y1="182" x2="193" y2="574" class="lifeline"/>
+  <line x1="513" y1="182" x2="513" y2="574" class="lifeline"/>
+  <line x1="833" y1="182" x2="833" y2="574" class="lifeline"/>
+  <line x1="1153" y1="182" x2="1153" y2="574" class="lifeline"/>
+
+  <circle cx="193" cy="232" r="15" fill="#2563eb"/>
+  <text x="193" y="237" text-anchor="middle" class="step">1</text>
+  <path d="M208 232 H498" class="blue"/>
+  <text x="353" y="220" text-anchor="middle" class="event">Read code after cache miss</text>
+
+  <circle cx="513" cy="292" r="15" fill="#2563eb"/>
+  <text x="513" y="297" text-anchor="middle" class="step">2</text>
+  <path d="M498 292 H208" class="blue"/>
+  <text x="353" y="280" text-anchor="middle" class="event">Return mapping version 7</text>
+
+  <circle cx="833" cy="352" r="15" fill="#7c3aed"/>
+  <text x="833" y="357" text-anchor="middle" class="step">3</text>
+  <path d="M818 352 H528" class="purple"/>
+  <text x="673" y="340" text-anchor="middle" class="event">UPDATE WHERE version = 7</text>
+
+  <circle cx="513" cy="412" r="15" fill="#7c3aed"/>
+  <text x="513" y="417" text-anchor="middle" class="step">4</text>
+  <path d="M528 412 H818" class="purple"/>
+  <text x="673" y="400" text-anchor="middle" class="event">Commit and return version 8</text>
+
+  <circle cx="833" cy="472" r="15" fill="#7c3aed"/>
+  <text x="833" y="477" text-anchor="middle" class="step">5</text>
+  <path d="M848 472 H1138" class="purple"/>
+  <text x="993" y="460" text-anchor="middle" class="event">PutIfNewer(version 8)</text>
+
+  <circle cx="193" cy="532" r="15" fill="#dc2626"/>
+  <text x="193" y="537" text-anchor="middle" class="step">6</text>
+  <path d="M208 532 H1138" class="red"/>
+  <text x="673" y="520" text-anchor="middle" class="event">Late PutIfNewer(version 7)</text>
+
+  <rect x="1046" y="548" width="214" height="50" rx="12" fill="#fef2f2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="1153" y="570" text-anchor="middle" class="lane" fill="#b91c1c">Rejected</text>
+  <text x="1153" y="589" text-anchor="middle" class="copy">Version 8 remains cached</text>
+
+  <rect x="74" y="596" width="878" height="38" rx="10" fill="#ecfdf5"/>
+  <text x="513" y="621" text-anchor="middle" class="event" fill="#047857">Atomic compare-and-write closes the stale restoration race.</text>
+</svg>

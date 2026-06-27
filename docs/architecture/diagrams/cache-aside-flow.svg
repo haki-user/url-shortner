@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="700" viewBox="0 0 1400 700" role="img" aria-labelledby="title desc">
+  <title id="title">Cache-aside redirect resolution</title>
+  <desc id="desc">A redirect checks Redis, falls back to the source of truth on miss or error, performs a versioned cache fill, validates the mapping, and returns a redirect or unavailable response.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#059669"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d97706"/>
+    </marker>
+    <style>
+      .title { font: 700 32px Inter, "Segoe UI", sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px Inter, "Segoe UI", sans-serif; fill: #475569; }
+      .node-title { font: 700 16px Inter, "Segoe UI", sans-serif; fill: #0f172a; }
+      .copy { font: 400 13px Inter, "Segoe UI", sans-serif; fill: #475569; }
+      .label { font: 700 12px Inter, "Segoe UI", sans-serif; }
+      .card { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; filter: url(#shadow); }
+      .redis { fill: #f5f3ff; stroke: #7c3aed; stroke-width: 2; filter: url(#shadow); }
+      .store { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
+      .validate { fill: #ecfdf5; stroke: #059669; stroke-width: 2; filter: url(#shadow); }
+      .warn { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }
+      .line { stroke: #334155; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .green { stroke: #059669; stroke-width: 2.5; fill: none; marker-end: url(#arrow-green); }
+      .amber { stroke: #d97706; stroke-width: 2.5; fill: none; marker-end: url(#arrow-amber); }
+      .dashed { stroke-dasharray: 7 5; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="700" fill="#ffffff"/>
+  <text x="44" y="54" class="title">Redirect resolution: cache aside, never cache dependent</text>
+  <text x="44" y="82" class="subtitle">Redis reduces source reads; it does not become the source of truth or a readiness dependency.</text>
+
+  <rect x="54" y="160" width="170" height="82" rx="14" class="card"/>
+  <text x="139" y="192" text-anchor="middle" class="node-title">GET /{code}</text>
+  <text x="139" y="216" text-anchor="middle" class="copy">Visitor request</text>
+
+  <path d="M224 201 H292" class="line"/>
+  <rect x="294" y="150" width="206" height="102" rx="15" class="redis"/>
+  <text x="397" y="184" text-anchor="middle" class="node-title">1. Redis GET</text>
+  <text x="397" y="208" text-anchor="middle" class="copy">Short independent timeout</text>
+  <text x="397" y="229" text-anchor="middle" class="copy">Return versioned mapping</text>
+
+  <path d="M500 180 H612" class="green"/>
+  <text x="556" y="167" text-anchor="middle" class="label" fill="#047857">HIT</text>
+
+  <path d="M397 252 V350 H612" class="amber"/>
+  <text x="430" y="337" class="label" fill="#b45309">MISS OR ERROR</text>
+
+  <rect x="614" y="306" width="220" height="96" rx="15" class="store"/>
+  <text x="724" y="340" text-anchor="middle" class="node-title">2. Source read</text>
+  <text x="724" y="364" text-anchor="middle" class="copy">Postgres / URL store</text>
+  <text x="724" y="385" text-anchor="middle" class="copy">Authoritative mapping</text>
+
+  <path d="M834 354 H914" class="line"/>
+  <text x="874" y="341" text-anchor="middle" class="label" fill="#475569">FILL</text>
+  <rect x="916" y="306" width="240" height="96" rx="15" class="redis"/>
+  <text x="1036" y="340" text-anchor="middle" class="node-title">3. PutIfNewer</text>
+  <text x="1036" y="364" text-anchor="middle" class="copy">Best effort, TTL bounded</text>
+  <text x="1036" y="385" text-anchor="middle" class="copy">Older versions rejected</text>
+
+  <rect x="614" y="150" width="252" height="102" rx="15" class="validate"/>
+  <text x="740" y="184" text-anchor="middle" class="node-title">4. Validate every hit</text>
+  <text x="740" y="208" text-anchor="middle" class="copy">Status must be active</text>
+  <text x="740" y="229" text-anchor="middle" class="copy">now must be before expiresAt</text>
+
+  <path d="M724 306 V254" class="green"/>
+  <text x="736" y="283" class="label" fill="#047857">MAPPING</text>
+
+  <path d="M866 180 H960" class="green"/>
+  <text x="913" y="167" text-anchor="middle" class="label" fill="#047857">ELIGIBLE</text>
+  <rect x="962" y="140" width="160" height="82" rx="14" class="validate"/>
+  <text x="1042" y="173" text-anchor="middle" class="node-title">302</text>
+  <text x="1042" y="197" text-anchor="middle" class="copy">Location header</text>
+
+  <path d="M866 226 H884 V492 H962" class="amber"/>
+  <text x="928" y="479" text-anchor="end" class="label" fill="#b45309">INACTIVE OR EXPIRED</text>
+  <rect x="962" y="451" width="160" height="82" rx="14" class="warn"/>
+  <text x="1042" y="484" text-anchor="middle" class="node-title">404</text>
+  <text x="1042" y="508" text-anchor="middle" class="copy">Do not redirect</text>
+
+  <rect x="54" y="565" width="1292" height="92" rx="16" fill="#f8fafc" stroke="#cbd5e1"/>
+  <circle cx="92" cy="597" r="8" fill="#7c3aed"/>
+  <text x="112" y="602" class="node-title">Cache failure:</text>
+  <text x="236" y="602" class="copy">fall back to the source of truth and record a metric.</text>
+  <circle cx="612" cy="597" r="8" fill="#2563eb"/>
+  <text x="632" y="602" class="node-title">Source failure:</text>
+  <text x="760" y="602" class="copy">serve only a safe active cache hit; otherwise return a service error.</text>
+  <circle cx="92" cy="628" r="8" fill="#059669"/>
+  <text x="112" y="633" class="node-title">Correctness:</text>
+  <text x="220" y="633" class="copy">status and expiration are checked after cache retrieval, never assumed from key presence.</text>
+</svg>
