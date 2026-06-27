@@ -15,17 +15,20 @@ import (
 )
 
 type ManagementHandler struct {
-	getManagedLink   application.GetManagedLink
-	changeLinkStatus application.ChangeLinkStatus
+	getManagedLink        application.GetManagedLink
+	changeLinkStatus      application.ChangeLinkStatus
+	changeLinkDestination application.ChangeLinkDestination
 }
 
 func NewManagementHandler(
 	getManagedLink application.GetManagedLink,
 	changeLinkStatus application.ChangeLinkStatus,
+	changeLinkDestination application.ChangeLinkDestination,
 ) ManagementHandler {
 	return ManagementHandler{
-		getManagedLink:   getManagedLink,
-		changeLinkStatus: changeLinkStatus,
+		getManagedLink:        getManagedLink,
+		changeLinkStatus:      changeLinkStatus,
+		changeLinkDestination: changeLinkDestination,
 	}
 }
 
@@ -64,8 +67,9 @@ func (h ManagementHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeManagedLinkResponse(w, http.StatusOK, link)
 }
 
-type changeLinkStatusHTTPRequest struct {
-	Status string `json:"status"`
+type patchLinkHTTPRequest struct {
+	Status      *string `json:"status"`
+	Destination *string `json:"destination"`
 }
 
 func (h ManagementHandler) Patch(w http.ResponseWriter, r *http.Request) {
@@ -87,48 +91,86 @@ func (h ManagementHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var request changeLinkStatusHTTPRequest
+	var request patchLinkHTTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	status, err := domain.ParseLinkStatus(
-		strings.ToLower(strings.TrimSpace(request.Status)),
-	)
-	if err != nil {
+	if request.Status == nil && request.Destination == nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	link, err := h.changeLinkStatus.Execute(
-		r.Context(),
-		application.ChangeLinkStatusRequest{
-			Code:            r.PathValue("code"),
-			OwnerID:         ownerID,
-			Status:          status,
-			ExpectedVersion: expectedVersion,
-		},
-	)
-	if err != nil {
-		switch {
-		case errors.Is(err, ports.ErrLinkNotFound),
-			errors.Is(err, application.ErrLinkAccessDenied):
-			http.NotFound(w, r)
-		case errors.Is(err, ports.ErrVersionConflict):
-			http.Error(w, "precondition failed", http.StatusPreconditionFailed)
-		case errors.Is(err, domain.ErrInvalidTransition):
-			http.Error(w, "conflict", http.StatusConflict)
-		case errors.Is(err, application.ErrInvalidExpectedVersion),
-			errors.Is(err, domain.ErrInvalidLinkStatus):
+	if request.Status != nil && request.Destination != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	var link domain.Link
+
+	switch {
+	case request.Status != nil:
+		status, parseErr := domain.ParseLinkStatus(
+			strings.ToLower(strings.TrimSpace(*request.Status)),
+		)
+		if parseErr != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
-		default:
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
 		}
+
+		link, err = h.changeLinkStatus.Execute(
+			r.Context(),
+			application.ChangeLinkStatusRequest{
+				Code:            r.PathValue("code"),
+				OwnerID:         ownerID,
+				Status:          status,
+				ExpectedVersion: expectedVersion,
+			},
+		)
+
+	case request.Destination != nil:
+		link, err = h.changeLinkDestination.Execute(
+			r.Context(),
+			application.ChangeLinkDestinationRequest{
+				Code:            r.PathValue("code"),
+				OwnerID:         ownerID,
+				Destination:     *request.Destination,
+				ExpectedVersion: expectedVersion,
+			},
+		)
+	}
+
+	if err != nil {
+		writeManagementMutationError(w, r, err)
 		return
 	}
 
 	writeManagedLinkResponse(w, http.StatusOK, link)
+}
+
+func writeManagementMutationError(
+	w http.ResponseWriter,
+	r *http.Request,
+	err error,
+) {
+	switch {
+	case errors.Is(err, ports.ErrLinkNotFound),
+		errors.Is(err, application.ErrLinkAccessDenied):
+		http.NotFound(w, r)
+	case errors.Is(err, ports.ErrVersionConflict):
+		http.Error(w, "precondition failed", http.StatusPreconditionFailed)
+	case errors.Is(err, domain.ErrInvalidTransition),
+		errors.Is(err, domain.ErrDeletedLink),
+		errors.Is(err, domain.ErrUnchangedDestination):
+		http.Error(w, "conflict", http.StatusConflict)
+	case errors.Is(err, application.ErrInvalidExpectedVersion),
+		errors.Is(err, domain.ErrInvalidLinkStatus),
+		isValidationError(err):
+		http.Error(w, "bad request", http.StatusBadRequest)
+	default:
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}
 }
 
 func parseIfMatch(value string) (uint64, error) {

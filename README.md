@@ -145,6 +145,22 @@ returns the updated resource and its new `ETag`. Missing `If-Match` returns
 `428`, a stale version returns `412`, and an invalid lifecycle transition
 returns `409`. Deletion is terminal.
 
+The same endpoint can update the destination:
+
+```http
+PATCH /v1/links/{code}
+X-Owner-ID: owner-1
+If-Match: "2"
+Content-Type: application/json
+
+{"destination":"https://example.com/new"}
+```
+
+Each PATCH currently accepts exactly one mutable field. Invalid destinations
+return `400`; unchanged destinations or updates to deleted links return `409`.
+A successful update changes future redirects immediately and returns the next
+resource version.
+
 ## Local Postgres
 
 Postgres runs through Docker Compose for local development. The Go service still runs directly on your machine until we containerize the app.

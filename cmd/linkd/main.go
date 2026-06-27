@@ -68,6 +68,10 @@ func run() error {
 	redirectLink := application.NewRedirectLink(storage.repository, clock)
 	getManagedLink := application.NewGetManagedLink(storage.repository)
 	changeLinkStatus := application.NewChangeLinkStatus(storage.repository, clock)
+	changeLinkDestination := application.NewChangeLinkDestination(
+		storage.repository,
+		clock,
+	)
 
 	linkHandler := httpapi.NewHandler(
 		createGeneratedLink,
@@ -78,6 +82,7 @@ func run() error {
 	managementHandler := httpapi.NewManagementHandler(
 		getManagedLink,
 		changeLinkStatus,
+		changeLinkDestination,
 	)
 
 	healthHandler := health.NewHandler(storage.readinessChecker)

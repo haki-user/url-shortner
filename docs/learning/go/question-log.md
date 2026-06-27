@@ -917,6 +917,38 @@ The HTTP adapter parses `If-Match` and status text. The application verifies
 ownership and expected version. The domain enforces valid transitions. The
 repository performs the final atomic version check.
 
+### Why Does the PATCH Request Use `*string` Fields?
+
+A plain string cannot tell whether JSON omitted a field or explicitly supplied
+an empty string; both decode to `""`:
+
+```go
+type request struct {
+    Destination string `json:"destination"`
+}
+```
+
+Using a pointer preserves field presence:
+
+```go
+type request struct {
+    Status      *string `json:"status"`
+    Destination *string `json:"destination"`
+}
+```
+
+```text
+field omitted             -> nil
+field present as ""       -> pointer to ""
+field present with value  -> pointer to that value
+```
+
+The pointer does not mean the handler intends to mutate the caller's string. It
+is an optional-value representation. The adapter rejects requests containing
+both fields or neither field, then delegates the one requested operation to its
+application use case. An explicitly empty destination reaches domain URL
+validation and returns `400`.
+
 An owner header such as `X-Owner-ID` is only a temporary local-development
 stand-in. A production service must derive owner identity from verified
 authentication or a trusted gateway, not trust a client-supplied owner header.
