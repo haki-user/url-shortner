@@ -48,7 +48,13 @@ Domain and application packages must not import infrastructure-specific packages
 
 ## Design Reference
 
-See [outputs/tinyurl-system-design.md](../outputs/tinyurl-system-design.md) for the complete target architecture and low-level design.
+- [System Architecture](docs/architecture/system-overview.md) is the
+  authoritative current-versus-target overview.
+- [Redirect Cache Design](docs/architecture/redirect-cache.md) defines the next
+  scale milestone and its correctness model.
+- [Extended System Design](../outputs/tinyurl-system-design.md) contains the
+  broader interview design and long-term alternatives.
+- [Architecture Decision Records](docs/adr/README.md) capture durable choices.
 
 ## Local Smoke Test
 

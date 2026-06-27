@@ -35,3 +35,7 @@ What credible alternatives were considered?
 What becomes easier, harder, or constrained?
 ```
 
+## Records
+
+- [0001: Postgres Persistence](0001-postgres-persistence.md)
+- [0002: Versioned Cache-Aside Redirect Resolution](0002-versioned-cache-aside.md)
