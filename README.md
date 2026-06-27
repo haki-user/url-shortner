@@ -128,6 +128,23 @@ identity returns `401`; a missing link or ownership mismatch returns `404`.
 `X-Owner-ID` is only a local-development stand-in. Production identity must
 come from verified authentication or a trusted gateway.
 
+Change a link's lifecycle status using the version returned by the management
+read:
+
+```http
+PATCH /v1/links/{code}
+X-Owner-ID: owner-1
+If-Match: "1"
+Content-Type: application/json
+
+{"status":"disabled"}
+```
+
+Supported targets are `active`, `disabled`, and `deleted`. A successful update
+returns the updated resource and its new `ETag`. Missing `If-Match` returns
+`428`, a stale version returns `412`, and an invalid lifecycle transition
+returns `409`. Deletion is terminal.
+
 ## Local Postgres
 
 Postgres runs through Docker Compose for local development. The Go service still runs directly on your machine until we containerize the app.

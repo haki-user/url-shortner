@@ -67,6 +67,7 @@ func run() error {
 	)
 	redirectLink := application.NewRedirectLink(storage.repository, clock)
 	getManagedLink := application.NewGetManagedLink(storage.repository)
+	changeLinkStatus := application.NewChangeLinkStatus(storage.repository, clock)
 
 	linkHandler := httpapi.NewHandler(
 		createGeneratedLink,
@@ -74,7 +75,10 @@ func run() error {
 		cfg.BaseURL,
 		httpapi.WithAnalytics(storage.analyticsRecorder, clock),
 	)
-	managementHandler := httpapi.NewManagementHandler(getManagedLink)
+	managementHandler := httpapi.NewManagementHandler(
+		getManagedLink,
+		changeLinkStatus,
+	)
 
 	healthHandler := health.NewHandler(storage.readinessChecker)
 
@@ -82,6 +86,7 @@ func run() error {
 	mux.HandleFunc("GET /healthz", healthHandler.Liveness)
 	mux.HandleFunc("GET /readyz", healthHandler.Readiness)
 	mux.HandleFunc("GET /v1/links/{code}", managementHandler.Get)
+	mux.HandleFunc("PATCH /v1/links/{code}", managementHandler.Patch)
 	mux.Handle("/", linkHandler)
 
 	server := &http.Server{

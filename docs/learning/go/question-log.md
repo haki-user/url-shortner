@@ -895,6 +895,28 @@ strategy is called **optimistic concurrency control** because requests proceed
 without locking the row while the user thinks, then verify the version at write
 time.
 
+The status-change use case checks the version twice for different reasons:
+
+1. The application compares the loaded link with `If-Match` and quickly rejects
+   a request that was already stale.
+2. The repository runs `UPDATE ... WHERE version = expectedVersion` to catch a
+   competing write that happens after the read but before this request writes.
+
+Only the second check is atomic with the database write. The first improves
+feedback and avoids attempting a mutation that is already known to be stale.
+
+Lifecycle transitions are domain behavior, not direct field assignment:
+
+```text
+active   -> disabled or deleted
+disabled -> active or deleted
+deleted  -> no further transition
+```
+
+The HTTP adapter parses `If-Match` and status text. The application verifies
+ownership and expected version. The domain enforces valid transitions. The
+repository performs the final atomic version check.
+
 An owner header such as `X-Owner-ID` is only a temporary local-development
 stand-in. A production service must derive owner identity from verified
 authentication or a trusted gateway, not trust a client-supplied owner header.

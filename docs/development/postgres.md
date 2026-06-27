@@ -85,6 +85,19 @@ docker compose -f deploy/local/compose.yaml exec postgres `
   psql -U tinyurl -d tinyurl -c "select code, destination_url, owner_id, status, version from links;"
 ```
 
+## Run Postgres Integration Tests
+
+Set the test database URL and run packages serially:
+
+```powershell
+$env:TINYURL_TEST_DATABASE_URL='postgres://tinyurl:tinyurl@localhost:5433/tinyurl?sslmode=disable'
+& 'C:\Program Files\Go\bin\go.exe' test -p 1 ./...
+```
+
+The Postgres adapter packages share one local test database and truncate the
+same tables during setup. `-p 1` prevents separate packages from truncating
+those tables concurrently and deadlocking each other.
+
 ## Reset Local Data
 
 Stop Postgres:
