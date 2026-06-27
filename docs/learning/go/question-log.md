@@ -754,6 +754,63 @@ handler := NewHandler(
    }
    ```
 
+## How Does the Server Stop?
+
+The server waits for one of two events:
+
+```text
+ListenAndServe fails --------> serverErrors channel ----+
+                                                        +--> select --> run returns
+Ctrl+C or SIGTERM -----------> ctx.Done() channel ------+             |
+                                                                      v
+                                                             deferred cleanup
+```
+
+### Ctrl+C or Application Container Stop
+
+- Ctrl+C normally sends `os.Interrupt`.
+- On Linux, `docker stop` normally sends `SIGTERM`, waits for its stop timeout,
+  and then uses `SIGKILL` if the process has not exited.
+- `signal.NotifyContext` converts `os.Interrupt` or `SIGTERM` into context
+  cancellation.
+- The `<-ctx.Done()` case becomes ready and starts graceful shutdown.
+- `server.Shutdown` stops new connections and waits for active requests.
+- If the shutdown timeout expires, `server.Close` forcibly closes connections.
+- `run` returns and its deferred database cleanup runs.
+
+### Server Failure
+
+`ListenAndServe` runs in a goroutine and sends its result through
+`serverErrors`. For example, it can fail because the address is already in use
+or the process cannot open the listening socket. The `serverErrors` case wins,
+`run` returns the wrapped error, deferred cleanup runs, and `main` exits with
+status 1.
+
+`http.ErrServerClosed` is expected during a requested shutdown, so it is
+converted to `nil`.
+
+### Stopping Only Postgres
+
+Stopping the Postgres container does not stop the application. Existing or new
+database operations fail while Postgres is unavailable. The application keeps
+listening, and the connection pool may reconnect after Postgres returns.
+`/healthz` currently does not test database availability; a separate readiness
+check is needed.
+
+### When Graceful Shutdown Cannot Run
+
+`SIGKILL`, an out-of-memory kill, power loss, or a machine crash cannot be
+handled by Go. Context cancellation and deferred functions do not run. Durable
+systems must therefore remain correct after abrupt termination; database
+transactions and constraints provide part of that protection.
+
+### `%w` Versus `%v`
+
+- `%w` includes an error and preserves it for `errors.Is` and `errors.As`.
+- `%v` includes only its readable text.
+- Wrap the primary cause with `%w`. Use `errors.Join` when multiple errors must
+  remain programmatically inspectable.
+
 ## Topics to Revisit
 
 - Slices, maps, and their reference-like behavior.

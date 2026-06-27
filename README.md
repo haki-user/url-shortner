@@ -2,7 +2,9 @@
 
 A production-oriented URL-shortening system implemented in Go.
 
-The repository is intentionally scaffolded without feature implementation. The goal is to implement and defend each design decision incrementally while preserving clear service ownership and domain boundaries.
+The repository is implemented incrementally so each design decision can be
+understood and defended while preserving clear service ownership and domain
+boundaries.
 
 ## Target Workloads
 
@@ -82,6 +84,21 @@ Expected result:
 StatusCode: 302
 Location: https://example.com
 ```
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TINYURL_STORAGE` | `memory` | Storage adapter: `memory` or `postgres` |
+| `TINYURL_DATABASE_URL` | none | Postgres connection URL; required with Postgres storage |
+| `TINYURL_ADDR` | `:8080` | Address on which the HTTP server listens |
+| `TINYURL_BASE_URL` | `http://localhost:8080` | Public URL used when returning short links |
+| `TINYURL_SHUTDOWN_TIMEOUT` | `10s` | Maximum time allowed for graceful HTTP shutdown |
+
+Use [.env.example](.env.example) as a local configuration template. The Go
+service reads operating-system environment variables and does not automatically
+load a `.env` file. Development tooling or the shell must load those values
+before starting the service.
 
 ## Local Postgres
 

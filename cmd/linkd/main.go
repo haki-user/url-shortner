@@ -2,14 +2,19 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"strings"
+	"os/signal"
+	"syscall"
+	"time"
 
 	analyticsmemory "tinyurl/internal/analytics/adapters/memory"
 	analyticspostgres "tinyurl/internal/analytics/adapters/postgres"
 	analyticsports "tinyurl/internal/analytics/ports"
+	"tinyurl/internal/config"
 	"tinyurl/internal/link/adapters/codegen"
 	"tinyurl/internal/link/adapters/httpapi"
 	linkmemory "tinyurl/internal/link/adapters/memory"
@@ -21,12 +26,26 @@ import (
 )
 
 func main() {
-	const addr = ":8080"
-	const baseURL = "http://localhost:8080"
+	if err := run(); err != nil {
+		log.Printf("linkd stopped: %v", err)
+		os.Exit(1)
+	}
+}
 
-	ctx := context.Background()
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 
-	repository, idempotencyStore, analyticsRecorder, cleanup := buildStorage(ctx)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	repository, idempotencyStore, analyticsRecorder, cleanup, err := buildStorage(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("build storage: %w", err)
+	}
+	defer cleanup()
 
 	generator := codegen.NewBase62Generator()
 	clock := system.SystemClock{}
@@ -42,63 +61,106 @@ func main() {
 	handler := httpapi.NewHandler(
 		createGeneratedLink,
 		redirectLink,
-		baseURL,
+		cfg.BaseURL,
 		httpapi.WithAnalytics(analyticsRecorder, clock),
 	)
 
-	log.Printf("linkd listening on %s", addr)
-
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		cleanup()
-		log.Fatalf("listen and serve: %v", err)
+	server := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
+
+	serverErrors := make(chan error, 1)
+
+	go func() {
+		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+			return
+		}
+
+		serverErrors <- nil
+	}()
+
+	log.Printf("linkd listening on %s", cfg.Addr)
+
+	select {
+	case err := <-serverErrors:
+		if err != nil {
+			return fmt.Errorf("listen and serve: %w", err)
+		}
+
+		return nil
+
+	case <-ctx.Done():
+		log.Println("shutdown signal received")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		if closeErr := server.Close(); closeErr != nil {
+			return errors.Join(
+				fmt.Errorf("shutdown server: %w", err),
+				fmt.Errorf("force close server: %w", closeErr),
+			)
+		}
+
+		return fmt.Errorf("shutdown server: %w", err)
+	}
+
+	if err := <-serverErrors; err != nil {
+		return fmt.Errorf("server stopped during shutdown: %w", err)
+	}
+
+	log.Println("shutdown complete")
+
+	return nil
 }
 
-func buildStorage(ctx context.Context) (
+func buildStorage(ctx context.Context, cfg config.Config) (
 	linkports.LinkRepository,
 	linkports.IdempotencyStore,
 	analyticsports.RedirectEventRecorder,
 	func(),
+	error,
 ) {
-	storage := strings.ToLower(strings.TrimSpace(os.Getenv("TINYURL_STORAGE")))
-	if storage == "" {
-		storage = "memory"
-	}
 
-	switch storage {
-	case "memory":
+	switch cfg.Storage {
+	case config.StorageMemory:
 		log.Println("using memory storage")
 
 		return linkmemory.NewRepository(),
 			linkmemory.NewIdempotencyStore(),
 			analyticsmemory.NewRedirectEventRecorder(),
-			func() {}
+			func() {},
+			nil
 
-	case "postgres":
+	case config.StoragePostgres:
 		log.Println("using postgres storage")
 
-		databaseURL := strings.TrimSpace(os.Getenv("TINYURL_DATABASE_URL"))
-		if databaseURL == "" {
-			log.Fatal("TINYURL_DATABASE_URL is required when TINYURL_STORAGE=postgres")
-		}
-
-		pool, err := storagepostgres.OpenPool(ctx, databaseURL)
+		pool, err := storagepostgres.OpenPool(ctx, cfg.DatabaseURL)
 		if err != nil {
-			log.Fatalf("open postgres pool: %v", err)
+			return nil, nil, nil, nil, fmt.Errorf("open postgres pool: %w", err)
 		}
 
 		if err := pool.Ping(ctx); err != nil {
 			pool.Close()
-			log.Fatalf("ping postgres: %v", err)
+			return nil, nil, nil, nil, fmt.Errorf("ping postgres: %w", err)
 		}
 
 		return linkpostgres.NewRepository(pool),
 			linkpostgres.NewIdempotencyStore(pool),
 			analyticspostgres.NewRedirectEventRecorder(pool),
-			pool.Close
+			pool.Close,
+			nil
 
 	default:
-		log.Fatalf("unsupported TINYURL_STORAGE %q, expected memory or postgres", storage)
-		return nil, nil, nil, func() {}
+		return nil, nil, nil, nil, fmt.Errorf("unsupported storage mode: %q", cfg.Storage)
 	}
 }
