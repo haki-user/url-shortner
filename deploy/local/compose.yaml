@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tinyurl-postgres
+    environment:
+      POSTGRES_DB: tinyurl
+      POSTGRES_USER: tinyurl
+      POSTGRES_PASSWORD: tinyurl
+    ports:
+      - "5433:5432"
+    volumes:
+      - tinyurl-postgres-data:/var/lib/postgresql/data
+      - ../../migrations/postgres:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tinyurl -d tinyurl"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: tinyurl-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    profiles: ["app"]
+    image: tinyurl-linkd:local
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    entrypoint: ["/app/migrate"]
+    environment:
+      TINYURL_DATABASE_URL: postgres://tinyurl:tinyurl@postgres:5432/tinyurl?sslmode=disable
+      TINYURL_MIGRATIONS_DIR: /app/migrations/postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  linkd:
+    profiles: ["app"]
+    image: tinyurl-linkd:local
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: tinyurl-linkd
+    environment:
+      TINYURL_STORAGE: postgres
+      TINYURL_DATABASE_URL: postgres://tinyurl:tinyurl@postgres:5432/tinyurl?sslmode=disable
+      TINYURL_CACHE: redis
+      TINYURL_REDIS_URL: redis://redis:6379
+      TINYURL_CACHE_OPERATION_TIMEOUT: 25ms
+      TINYURL_CACHE_ACTIVE_TTL: 60s
+      TINYURL_CACHE_INACTIVE_TTL: 30s
+      TINYURL_ADDR: :8080
+      TINYURL_BASE_URL: ${TINYURL_BASE_URL:-http://localhost:8080}
+      TINYURL_SHUTDOWN_TIMEOUT: 10s
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  tinyurl-postgres-data:

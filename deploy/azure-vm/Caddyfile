@@ -1,0 +1,11 @@
+{$TINYURL_SITE_ADDRESS} {
+	encode zstd gzip
+
+	header {
+		-Server
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+	}
+
+	reverse_proxy linkd:8080
+}

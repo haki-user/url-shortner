@@ -2,7 +2,9 @@
 
 A production-oriented URL-shortening system implemented in Go.
 
-The repository is intentionally scaffolded without feature implementation. The goal is to implement and defend each design decision incrementally while preserving clear service ownership and domain boundaries.
+The repository is implemented incrementally so each design decision can be
+understood and defended while preserving clear service ownership and domain
+boundaries.
 
 ## Target Workloads
 
@@ -46,4 +48,167 @@ Domain and application packages must not import infrastructure-specific packages
 
 ## Design Reference
 
-See [outputs/tinyurl-system-design.md](../outputs/tinyurl-system-design.md) for the complete target architecture and low-level design.
+- [Visual Architecture Guide](docs/architecture/visual-guide.md) is the main
+  HLD-to-LLD view of the system, runtime flows, domain, and data model.
+- [Project Visual Map](docs/architecture/project_mindmap.md) is the quickest
+  way to understand the Go patterns, interfaces, adapters, and object wiring
+  used by the current code.
+- [System Architecture](docs/architecture/system-overview.md) is the
+  authoritative current-versus-target overview.
+- [Redirect Cache Design](docs/architecture/redirect-cache.md) defines the next
+  scale milestone and its correctness model.
+- [Extended System Design](../outputs/tinyurl-system-design.md) contains the
+  broader interview design and long-term alternatives.
+- [Architecture Decision Records](docs/adr/README.md) capture durable choices.
+
+## Local Smoke Test
+
+Run the service:
+
+```powershell
+& "C:\Program Files\Go\bin\go.exe" run ./cmd/linkd
+```
+
+In another PowerShell window, create a short link:
+
+```powershell
+Invoke-RestMethod -Method Post http://localhost:8080/v1/links `
+  -ContentType "application/json" `
+  -Body '{"destination":"https://example.com","ownerId":"owner-1"}'
+```
+
+The generated response contains a random eight-character Base62 code, for
+example:
+
+```text
+http://localhost:8080/iI6219HM
+```
+
+Verify the redirect without following it:
+
+```powershell
+Invoke-WebRequest <shortUrl-from-create-response> -MaximumRedirection 0 -SkipHttpErrorCheck
+```
+
+Expected result:
+
+```text
+StatusCode: 302
+Location: https://example.com
+```
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TINYURL_STORAGE` | `memory` | Storage adapter: `memory` or `postgres` |
+| `TINYURL_DATABASE_URL` | none | Postgres connection URL; required with Postgres storage |
+| `TINYURL_CACHE` | `none` | Redirect cache adapter: `none` or `redis` |
+| `TINYURL_REDIS_URL` | none | Redis connection URL; required with Redis cache |
+| `TINYURL_CACHE_OPERATION_TIMEOUT` | `25ms` | Maximum duration of one Redis operation |
+| `TINYURL_CACHE_ACTIVE_TTL` | `60s` | Default TTL for active redirect mappings |
+| `TINYURL_CACHE_INACTIVE_TTL` | `30s` | Default TTL for disabled/deleted mappings |
+| `TINYURL_ADDR` | `:8080` | Address on which the HTTP server listens |
+| `TINYURL_BASE_URL` | `http://localhost:8080` | Public URL used when returning short links |
+| `TINYURL_SHUTDOWN_TIMEOUT` | `10s` | Maximum time allowed for graceful HTTP shutdown |
+
+Use [.env.example](.env.example) as a local configuration template. The Go
+service reads operating-system environment variables and does not automatically
+load a `.env` file. Development tooling or the shell must load those values
+before starting the service.
+
+## Container Deployment
+
+The production image contains the HTTP service and a one-shot migration
+command. See [Container Deployment](docs/deployment/container.md) for image
+builds, the local Compose app profile, migration semantics, health probes, and
+the cloud runtime contract.
+
+The initial cloud target is documented in
+[Azure Deployment](docs/deployment/azure.md). GitHub Actions CI runs Go tests,
+vet, and a production image build before Azure CD is enabled.
+
+## Health Endpoints
+
+- `GET /healthz` is a liveness check. It returns `200` while the process can
+  serve HTTP and does not check external dependencies.
+- `GET /readyz` is a readiness check. It returns `200` when required storage is
+  available and `503` when the service should not receive traffic.
+
+Readiness checks have a two-second timeout. Health responses use
+`Cache-Control: no-store` so infrastructure does not reuse stale probe results.
+With Postgres storage, stopping Postgres leaves `/healthz` healthy while
+`/readyz` reports `503`; readiness recovers after Postgres reconnects.
+
+## Link Management
+
+Read the current owner-facing state and version of a link:
+
+```http
+GET /v1/links/{code}
+X-Owner-ID: owner-1
+```
+
+A successful response includes status, timestamps, expiration, and version,
+plus an `ETag` such as `"1"`. The response does not expose the owner ID. Missing
+identity returns `401`; a missing link or ownership mismatch returns `404`.
+
+`X-Owner-ID` is only a local-development stand-in. Production identity must
+come from verified authentication or a trusted gateway.
+
+Change a link's lifecycle status using the version returned by the management
+read:
+
+```http
+PATCH /v1/links/{code}
+X-Owner-ID: owner-1
+If-Match: "1"
+Content-Type: application/json
+
+{"status":"disabled"}
+```
+
+Supported targets are `active`, `disabled`, and `deleted`. A successful update
+returns the updated resource and its new `ETag`. Missing `If-Match` returns
+`428`, a stale version returns `412`, and an invalid lifecycle transition
+returns `409`. Deletion is terminal.
+
+The same endpoint can update the destination:
+
+```http
+PATCH /v1/links/{code}
+X-Owner-ID: owner-1
+If-Match: "2"
+Content-Type: application/json
+
+{"destination":"https://example.com/new"}
+```
+
+Each PATCH currently accepts exactly one mutable field. Invalid destinations
+return `400`; unchanged destinations or updates to deleted links return `409`.
+A successful update changes future redirects immediately and returns the next
+resource version.
+
+Set or clear expiration through the same versioned PATCH:
+
+```json
+{"expiresAt":"2026-07-01T12:00:00Z"}
+```
+
+```json
+{"expiresAt":null}
+```
+
+An omitted field means no expiration operation, a timestamp sets expiration,
+and `null` clears it. Expiration must be in the future. Setting the same value,
+clearing an absent expiration, or changing a deleted link returns `409`.
+
+## Local Postgres
+
+Postgres runs through Docker Compose for local development. The Go service still runs directly on your machine until we containerize the app.
+
+See [Local Postgres Development](docs/development/postgres.md).
+
+## Learning Reference
+
+See the [Go Learning Handbook](docs/learning/go/README.md) for the language mental model, project context, detailed explanations, cheat sheet, and question log built alongside this project.

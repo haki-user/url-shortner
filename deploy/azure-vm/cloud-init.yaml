@@ -1,0 +1,17 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - docker.io
+  - docker-compose-v2
+
+runcmd:
+  - systemctl enable --now docker
+  - usermod -aG docker azureuser
+  - mkdir -p /opt/tinyurl
+  - chown -R azureuser:azureuser /opt/tinyurl
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash

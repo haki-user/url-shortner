@@ -1,0 +1,104 @@
+digraph TinyURLDataModel {
+  graph [
+    rankdir=TB,
+    bgcolor="#ffffff",
+    pad="0.35",
+    nodesep="0.65",
+    ranksep="0.9",
+    splines=polyline,
+    fontname="Segoe UI",
+    fontsize=20,
+    labelloc=t,
+    label="TinyURL Postgres data model"
+  ];
+  node [shape=plain, fontname="Segoe UI", fontcolor="#0f172a"];
+  edge [
+    color="#475569",
+    fontcolor="#475569",
+    fontname="Segoe UI",
+    fontsize=9,
+    arrowsize=0.75,
+    penwidth=1.35
+  ];
+
+  links [
+    label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="7" COLOR="#2563eb">
+        <TR><TD BGCOLOR="#dbeafe"><B>links</B></TD></TR>
+        <TR><TD ALIGN="LEFT"><B>PK</B> code text</TD></TR>
+        <TR><TD ALIGN="LEFT">destination_url text</TD></TR>
+        <TR><TD ALIGN="LEFT">owner_id text</TD></TR>
+        <TR><TD ALIGN="LEFT">status text</TD></TR>
+        <TR><TD ALIGN="LEFT">created_at<BR/>timestamptz</TD></TR>
+        <TR><TD ALIGN="LEFT">updated_at timestamptz</TD></TR>
+        <TR><TD ALIGN="LEFT">expires_at timestamptz nullable</TD></TR>
+        <TR><TD ALIGN="LEFT">version bigint</TD></TR>
+        <TR><TD BGCOLOR="#eff6ff" ALIGN="LEFT">one row = one<BR/>Link aggregate</TD></TR>
+      </TABLE>
+    >
+  ];
+
+  idempotency [
+    label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="7" COLOR="#7c3aed">
+        <TR><TD BGCOLOR="#ede9fe"><B>idempotency_keys</B></TD></TR>
+        <TR><TD ALIGN="LEFT"><B>PK</B> owner_id + key</TD></TR>
+        <TR><TD ALIGN="LEFT"><B>FK</B> code -&gt; links.code</TD></TR>
+        <TR><TD ALIGN="LEFT">created_at timestamptz</TD></TR>
+        <TR><TD BGCOLOR="#faf5ff" ALIGN="LEFT">retry key resolves<BR/>to original link</TD></TR>
+      </TABLE>
+    >
+  ];
+
+  events [
+    label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="7" COLOR="#059669">
+        <TR><TD BGCOLOR="#d1fae5"><B>redirect_events</B></TD></TR>
+        <TR><TD ALIGN="LEFT"><B>PK</B> id bigserial</TD></TR>
+        <TR><TD ALIGN="LEFT"><B>FK</B> code -&gt; links.code</TD></TR>
+        <TR><TD ALIGN="LEFT">occurred_at<BR/>timestamptz</TD></TR>
+        <TR><TD ALIGN="LEFT">user_agent nullable</TD></TR>
+        <TR><TD ALIGN="LEFT">referer nullable</TD></TR>
+        <TR><TD ALIGN="LEFT">ip nullable</TD></TR>
+        <TR><TD BGCOLOR="#ecfdf5" ALIGN="LEFT">append-only<BR/>redirect facts</TD></TR>
+      </TABLE>
+    >
+  ];
+
+  constraints [
+    label="DATABASE RULES\n\nstatus in active | disabled | deleted\nexpires_at is null or after created_at\nversion >= 1\noptimistic update matches\ncode + version",
+    shape=note,
+    style="filled",
+    fillcolor="#fffbeb",
+    color="#d97706",
+    fontname="Segoe UI",
+    fontsize=10
+  ];
+
+  indexes [
+    label="INDEXES\n\nlinks(owner_id, created_at desc)\nlinks(expires_at) partial\nlinks(status, expires_at)\nidempotency_keys(code)\nredirect_events(code, occurred_at desc)\nredirect_events(occurred_at)",
+    shape=note,
+    style="filled",
+    fillcolor="#f8fafc",
+    color="#64748b",
+    fontname="Segoe UI",
+    fontsize=10
+  ];
+
+  subgraph child_tables {
+    rank=same;
+    idempotency;
+    events;
+  }
+
+  subgraph supporting_notes {
+    rank=same;
+    constraints;
+    indexes;
+  }
+
+  links -> idempotency [label="1 link to many retry keys\nFK code", dir=both, arrowtail=tee, arrowhead=crow];
+  links -> events [label="1 link to many events\nFK code", dir=both, arrowtail=tee, arrowhead=crow];
+  links -> constraints [label="enforced by"];
+  links -> indexes [label="query support"];
+}

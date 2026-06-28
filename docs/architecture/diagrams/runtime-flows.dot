@@ -1,0 +1,70 @@
+digraph TinyURLRuntimeFlows {
+  graph [
+    rankdir=TB,
+    bgcolor="#ffffff",
+    pad="0.25",
+    fontname="Segoe UI"
+  ];
+  node [shape=plain, fontname="Segoe UI", fontcolor="#0f172a"];
+
+  flows [
+    label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="9" COLOR="#cbd5e1">
+        <TR>
+          <TD COLSPAN="6" BGCOLOR="#0f172a">
+            <FONT COLOR="#ffffff" POINT-SIZE="21"><B>TinyURL core runtime flows</B></FONT><BR/>
+            <FONT COLOR="#cbd5e1" POINT-SIZE="10">Read each operation from left to right</FONT>
+          </TD>
+        </TR>
+        <TR>
+          <TD BGCOLOR="#dbeafe"><B>ENTRY</B></TD>
+          <TD BGCOLOR="#dbeafe"><B>HANDLER</B></TD>
+          <TD BGCOLOR="#fef3c7"><B>USE CASE</B></TD>
+          <TD BGCOLOR="#dcfce7"><B>DOMAIN</B></TD>
+          <TD BGCOLOR="#ede9fe"><B>PORT -&gt; ADAPTER</B></TD>
+          <TD BGCOLOR="#ffedd5"><B>RESULT</B></TD>
+        </TR>
+        <TR>
+          <TD ALIGN="LEFT"><B>POST /v1/links</B></TD>
+          <TD ALIGN="LEFT">handleCreateLink<BR/>decode DTO</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fffbeb">CreateGeneratedLink<BR/>Execute<BR/>idempotency lookup<BR/>generate code<BR/>build aggregate</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#f0fdf4">NewDestinationURL<BR/>NewLink</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#faf5ff">IdempotencyStore<BR/>CodeGenerator<BR/>Clock<BR/>LinkRepository.Insert</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fff7ed">links +<BR/>idempotency_keys<BR/><B>201</B></TD>
+        </TR>
+        <TR>
+          <TD ALIGN="LEFT" BGCOLOR="#f8fafc"><B>GET /&#123;code&#125;</B></TD>
+          <TD ALIGN="LEFT" BGCOLOR="#f8fafc">handleRedirect</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fef3c7">RedirectLink.Execute</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#dcfce7">RehydrateLink<BR/>CanRedirect<BR/>NewRedirectEvent</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#ede9fe">LinkRepository.FindByCode<BR/>Clock<BR/>RedirectEventRecorder</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#ffedd5">read link + record event<BR/><B>302 or 404</B></TD>
+        </TR>
+        <TR>
+          <TD ALIGN="LEFT"><B>GET /v1/links/&#123;code&#125;</B></TD>
+          <TD ALIGN="LEFT">Management<BR/>Handler.Get</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fffbeb">GetManagedLink.Execute</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#f0fdf4">verify Link.OwnerID<BR/>return Link.Version</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#faf5ff">LinkRepository.FindByCode</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fff7ed">Link DTO + ETag<BR/><B>200 or 404</B></TD>
+        </TR>
+        <TR>
+          <TD ALIGN="LEFT" BGCOLOR="#f8fafc"><B>PATCH /v1/links/&#123;code&#125;</B><BR/>If-Match</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#f8fafc">Management<BR/>Handler.Patch<BR/>select one field</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fef3c7">Change status<BR/>Change destination<BR/>Change expiration</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#dcfce7">validate transition<BR/>mutate Link<BR/>version++</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#ede9fe">LinkRepository.FindByCode<BR/>LinkRepository.Update<BR/>Clock</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#ffedd5">optimistic UPDATE<BR/><B>200, 404, or 412</B></TD>
+        </TR>
+        <TR>
+          <TD ALIGN="LEFT"><B>GET /readyz</B></TD>
+          <TD ALIGN="LEFT">health.Handler<BR/>Readiness</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fffbeb">2-second child context</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#f0fdf4">no link-domain call</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#faf5ff">Checker -&gt; CheckerFunc<BR/>-&gt; pool.Ping</TD>
+          <TD ALIGN="LEFT" BGCOLOR="#fff7ed"><B>200 or 503</B></TD>
+        </TR>
+      </TABLE>
+    >
+  ];
+}

@@ -1,0 +1,85 @@
+digraph TinyURLSystemContext {
+  graph [
+    rankdir=LR,
+    bgcolor="#ffffff",
+    pad="0.35",
+    nodesep="0.55",
+    ranksep="0.9",
+    splines=polyline,
+    fontname="Segoe UI",
+    fontsize=20,
+    labelloc=t,
+    label="TinyURL system context"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Segoe UI",
+    fontsize=11,
+    color="#94a3b8",
+    fillcolor="#ffffff",
+    fontcolor="#0f172a",
+    margin="0.18,0.12"
+  ];
+  edge [
+    color="#334155",
+    fontcolor="#475569",
+    fontname="Segoe UI",
+    fontsize=9,
+    arrowsize=0.75,
+    penwidth=1.4
+  ];
+
+  owner [
+    label="Owner / API client\nCreates and manages links",
+    fillcolor="#eff6ff",
+    color="#2563eb"
+  ];
+  visitor [
+    label="Visitor\nFollows short links",
+    fillcolor="#eff6ff",
+    color="#2563eb"
+  ];
+  operator [
+    label="Operator / platform\nConfigures and probes service",
+    fillcolor="#f8fafc",
+    color="#64748b"
+  ];
+
+  tinyurl [
+    label="TinyURL\nGo service: linkd\nCreate | Redirect | Manage | Health\n\nCurrent: one deployable service",
+    fillcolor="#e0e7ff",
+    color="#4f46e5",
+    penwidth=2.4,
+    width=3.1,
+    height=1.7
+  ];
+
+  postgres [
+    label="Postgres\nAuthoritative links\nIdempotency records\nRedirect events",
+    shape=cylinder,
+    fillcolor="#fff7ed",
+    color="#ea580c",
+    penwidth=1.8
+  ];
+  redis [
+    label="Redis\nRedirect cache\nNEXT milestone",
+    shape=cylinder,
+    style="filled,dashed",
+    fillcolor="#faf5ff",
+    color="#7c3aed",
+    fontcolor="#6d28d9"
+  ];
+
+  owner -> tinyurl [label="HTTPS create / read / patch"];
+  visitor -> tinyurl [label="HTTPS GET /{code}"];
+  operator -> tinyurl [label="environment + health probes"];
+  tinyurl -> postgres [label="required reads and writes"];
+  tinyurl -> redis [
+    label="optional cache-aside",
+    style=dashed,
+    color="#7c3aed",
+    fontcolor="#7c3aed"
+  ];
+}

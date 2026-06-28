@@ -1,15 +1,36 @@
-.cache/
+# Compiled binaries/executables
 bin/
-coverage/
-*.coverprofile
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go workspace and lock files
+go.work
+go.work.sum
+
+# Go test / coverage outputs
 *.test
+*.coverprofile
+*.out
+*.prof
+
+# Cache and environment
+.cache/
 .env
 .env.*
 !.env.example
+
+# IDE and OS specific
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Project-specific data/temp
 data/
 tmp/
+coverage/
 docs/tasks
+*.log

@@ -1,6 +1,10 @@
 package domain
 
+import "errors"
+
 type LinkStatus uint8
+
+var ErrInvalidLinkStatus = errors.New("invalid link status")
 
 const (
 	Unknown LinkStatus = iota
@@ -43,5 +47,18 @@ func (s LinkStatus) String() string {
 		return "deleted"
 	default:
 		return "unknown"
+	}
+}
+
+func ParseLinkStatus(value string) (LinkStatus, error) {
+	switch value {
+	case "active":
+		return Active, nil
+	case "disabled":
+		return Disabled, nil
+	case "deleted":
+		return Deleted, nil
+	default:
+		return Unknown, ErrInvalidLinkStatus
 	}
 }
