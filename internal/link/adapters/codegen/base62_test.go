@@ -1,53 +1,46 @@
 package codegen
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 )
 
-func TestBase62GeneratorGenerateReturnsFirstFiveCodes(t *testing.T) {
+func TestBase62GeneratorGenerateReturnsFixedLengthURLSafeCode(t *testing.T) {
 	generator := NewBase62Generator()
 
-	tests := []string{"1", "2", "3", "4", "5"}
+	code, err := generator.Generate(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
 
-	for _, expected := range tests {
-		actual, err := generator.Generate(context.Background())
-		if err != nil {
-			t.Fatalf("expected no error, got %v", err)
-		}
+	if len(code) != defaultCodeLength {
+		t.Fatalf("expected code length %d, got %d", defaultCodeLength, len(code))
+	}
 
-		if actual != expected {
-			t.Fatalf("expected code %q, got %q", expected, actual)
+	for _, character := range code {
+		if !strings.ContainsRune(base62Alphabet, character) {
+			t.Fatalf("generated non-Base62 character %q", character)
 		}
 	}
 }
 
-func TestEncodeBase62Boundaries(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    uint64
-		expected string
-	}{
-		{name: "zero", input: 0, expected: "0"},
-		{name: "one", input: 1, expected: "1"},
-		{name: "nine", input: 9, expected: "9"},
-		{name: "ten", input: 10, expected: "a"},
-		{name: "thirty five", input: 35, expected: "z"},
-		{name: "thirty six", input: 36, expected: "A"},
-		{name: "sixty one", input: 61, expected: "Z"},
-		{name: "sixty two", input: 62, expected: "10"},
-		{name: "sixty three", input: 63, expected: "11"},
+func TestBase62GeneratorUsesRejectionSampling(t *testing.T) {
+	generator := &Base62Generator{
+		reader: bytes.NewReader([]byte{0, 61, 248, 62, 123, 0, 0, 0}),
+		length: 4,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			actual := encodeBase62(tt.input)
-			if actual != tt.expected {
-				t.Fatalf("expected %q, got %q", tt.expected, actual)
-			}
-		})
+	code, err := generator.Generate(context.Background())
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if code != "0Z0Z" {
+		t.Fatalf("expected deterministic code %q, got %q", "0Z0Z", code)
 	}
 }
 
@@ -67,24 +60,20 @@ func TestBase62GeneratorCancelledContextReturnsContextCanceled(t *testing.T) {
 	}
 }
 
-func TestBase62GeneratorCancelledGenerationDoesNotIncrementCounter(t *testing.T) {
-	generator := NewBase62Generator()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := generator.Generate(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected error %v, got %v", context.Canceled, err)
+func TestBase62GeneratorRandomSourceFailureIsReturned(t *testing.T) {
+	expectedErr := errors.New("random source failed")
+	generator := &Base62Generator{
+		reader: errorReader{err: expectedErr},
+		length: defaultCodeLength,
 	}
 
 	code, err := generator.Generate(context.Background())
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected error %v, got %v", expectedErr, err)
 	}
 
-	if code != "1" {
-		t.Fatalf("expected first successful code to be %q, got %q", "1", code)
+	if code != "" {
+		t.Fatalf("expected empty code, got %q", code)
 	}
 }
 
@@ -118,9 +107,7 @@ func TestBase62GeneratorConcurrentGenerationHasNoDuplicates(t *testing.T) {
 	close(errs)
 
 	for err := range errs {
-		if err != nil {
-			t.Fatalf("expected no error, got %v", err)
-		}
+		t.Fatalf("expected no error, got %v", err)
 	}
 
 	seen := make(map[string]struct{}, totalCodes)
@@ -131,8 +118,12 @@ func TestBase62GeneratorConcurrentGenerationHasNoDuplicates(t *testing.T) {
 
 		seen[code] = struct{}{}
 	}
+}
 
-	if len(seen) != totalCodes {
-		t.Fatalf("expected %d unique codes, got %d", totalCodes, len(seen))
-	}
+type errorReader struct {
+	err error
+}
+
+func (r errorReader) Read([]byte) (int, error) {
+	return 0, r.err
 }

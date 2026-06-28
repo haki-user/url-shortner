@@ -15,12 +15,18 @@ type createGeneratedLinkRepositoryFake struct {
 	insertCtx   context.Context
 	inserted    domain.Link
 	insertErr   error
+	insertErrs  []error
 }
 
 func (f *createGeneratedLinkRepositoryFake) Insert(ctx context.Context, link domain.Link) error {
+	callIndex := f.insertCalls
 	f.insertCalls++
 	f.insertCtx = ctx
 	f.inserted = link
+
+	if callIndex < len(f.insertErrs) {
+		return f.insertErrs[callIndex]
+	}
 
 	return f.insertErr
 }
@@ -38,11 +44,22 @@ type createGeneratedLinkGeneratorFake struct {
 	generateCtx   context.Context
 	code          string
 	err           error
+	codes         []string
+	errs          []error
 }
 
 func (f *createGeneratedLinkGeneratorFake) Generate(ctx context.Context) (string, error) {
+	callIndex := f.generateCalls
 	f.generateCalls++
 	f.generateCtx = ctx
+
+	if callIndex < len(f.errs) && f.errs[callIndex] != nil {
+		return "", f.errs[callIndex]
+	}
+
+	if callIndex < len(f.codes) {
+		return f.codes[callIndex], nil
+	}
 
 	return f.code, f.err
 }
@@ -304,7 +321,7 @@ func TestCreateGeneratedLinkInvalidExpirationStopsBeforeRepository(t *testing.T)
 func TestCreateGeneratedLinkRepositoryFailureIsReturnedUnchanged(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 14, 22, 10, 0, 0, time.UTC)
-	expectedErr := ports.ErrLinkAlreadyExists
+	expectedErr := errors.New("repository unavailable")
 
 	repository := &createGeneratedLinkRepositoryFake{insertErr: expectedErr}
 	generator := &createGeneratedLinkGeneratorFake{code: "abc123"}
@@ -339,6 +356,90 @@ func TestCreateGeneratedLinkRepositoryFailureIsReturnedUnchanged(t *testing.T) {
 
 	if repository.insertCtx != ctx {
 		t.Fatal("expected repository to receive original context")
+	}
+}
+
+func TestCreateGeneratedLinkRetriesCodeCollision(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 14, 22, 10, 0, 0, time.UTC)
+
+	repository := &createGeneratedLinkRepositoryFake{
+		insertErrs: []error{ports.ErrLinkAlreadyExists, nil},
+	}
+	generator := &createGeneratedLinkGeneratorFake{
+		codes: []string{"collision", "unique12"},
+	}
+	clock := &createGeneratedLinkClockFake{now: now}
+
+	useCase := NewCreateGeneratedLink(repository, generator, clock)
+
+	link, err := useCase.Execute(ctx, CreateGeneratedLinkRequest{
+		Destination: "https://example.com",
+		OwnerID:     "owner-1",
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if link.Code() != "unique12" {
+		t.Fatalf("expected retried code %q, got %q", "unique12", link.Code())
+	}
+
+	if generator.generateCalls != 2 {
+		t.Fatalf("expected two generation attempts, got %d", generator.generateCalls)
+	}
+
+	if repository.insertCalls != 2 {
+		t.Fatalf("expected two insert attempts, got %d", repository.insertCalls)
+	}
+
+	if clock.nowCalls != 1 {
+		t.Fatalf("expected one creation timestamp, got %d", clock.nowCalls)
+	}
+}
+
+func TestCreateGeneratedLinkReturnsExhaustedAfterRepeatedCollisions(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 14, 22, 10, 0, 0, time.UTC)
+
+	repository := &createGeneratedLinkRepositoryFake{
+		insertErr: ports.ErrLinkAlreadyExists,
+	}
+	generator := &createGeneratedLinkGeneratorFake{code: "collision"}
+	clock := &createGeneratedLinkClockFake{now: now}
+
+	useCase := NewCreateGeneratedLink(repository, generator, clock)
+
+	link, err := useCase.Execute(ctx, CreateGeneratedLinkRequest{
+		Destination: "https://example.com",
+		OwnerID:     "owner-1",
+	})
+	if !errors.Is(err, ErrCodeGenerationExhausted) {
+		t.Fatalf("expected error %v, got %v", ErrCodeGenerationExhausted, err)
+	}
+
+	if !errors.Is(err, ports.ErrLinkAlreadyExists) {
+		t.Fatalf("expected collision cause %v, got %v", ports.ErrLinkAlreadyExists, err)
+	}
+
+	if !linkIsZero(link) {
+		t.Fatal("expected zero-value link")
+	}
+
+	if generator.generateCalls != maxCodeGenerationAttempts {
+		t.Fatalf(
+			"expected %d generation attempts, got %d",
+			maxCodeGenerationAttempts,
+			generator.generateCalls,
+		)
+	}
+
+	if repository.insertCalls != maxCodeGenerationAttempts {
+		t.Fatalf(
+			"expected %d insert attempts, got %d",
+			maxCodeGenerationAttempts,
+			repository.insertCalls,
+		)
 	}
 }
 

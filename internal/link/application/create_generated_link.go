@@ -9,6 +9,10 @@ import (
 	"tinyurl/internal/link/ports"
 )
 
+const maxCodeGenerationAttempts = 5
+
+var ErrCodeGenerationExhausted = errors.New("code generation retries exhausted")
+
 type CreateGeneratedLinkRequest struct {
 	Destination    string
 	OwnerID        string
@@ -61,20 +65,46 @@ func (c CreateGeneratedLink) Execute(
 		return domain.Link{}, err
 	}
 
-	code, err := c.generator.Generate(ctx)
-	if err != nil {
-		return domain.Link{}, err
-	}
+	var (
+		link      domain.Link
+		createdAt time.Time
+	)
+	for attempt := 0; attempt < maxCodeGenerationAttempts; attempt++ {
+		code, err := c.generator.Generate(ctx)
+		if err != nil {
+			return domain.Link{}, err
+		}
 
-	now := c.clock.Now()
+		if attempt == 0 {
+			createdAt = c.clock.Now()
+		}
 
-	link, err := domain.NewLink(code, destination, request.OwnerID, now, request.ExpiresAt)
-	if err != nil {
-		return domain.Link{}, err
-	}
+		link, err = domain.NewLink(
+			code,
+			destination,
+			request.OwnerID,
+			createdAt,
+			request.ExpiresAt,
+		)
+		if err != nil {
+			return domain.Link{}, err
+		}
 
-	if err := c.repository.Insert(ctx, link); err != nil {
-		return domain.Link{}, err
+		err = c.repository.Insert(ctx, link)
+		if err == nil {
+			break
+		}
+
+		if !errors.Is(err, ports.ErrLinkAlreadyExists) {
+			return domain.Link{}, err
+		}
+
+		if attempt == maxCodeGenerationAttempts-1 {
+			return domain.Link{}, errors.Join(
+				ErrCodeGenerationExhausted,
+				ports.ErrLinkAlreadyExists,
+			)
+		}
 	}
 
 	if request.IdempotencyKey != "" && c.idempotencyStore != nil {

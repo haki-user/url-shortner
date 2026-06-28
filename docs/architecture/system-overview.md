@@ -210,11 +210,12 @@ Do not use code, owner ID, or destination URL as metric labels.
 5. Asynchronous analytics pipeline.
 6. Independent `redirectd`, CDN, multi-region reads, and emergency denylist.
 
-Before running multiple `linkd` replicas, replace the current process-local
-Base62 counter. It restarts at one after every process restart and cannot
-coordinate across replicas, so it can generate an existing code. Use a
-database/segment allocator, Snowflake-style IDs encoded as Base62, or random
-codes with bounded collision retries.
+Code creation currently uses cryptographically random eight-character Base62
+codes. Postgres enforces uniqueness, and creation retries a collision at most
+five times. This works across process restarts and replicas without a shared
+counter. At much larger scale, measure collision retries and capacity before
+choosing a longer code, range allocator, or Snowflake-style ID encoded as
+Base62.
 
 ## References
 

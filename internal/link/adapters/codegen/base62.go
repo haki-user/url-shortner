@@ -2,22 +2,32 @@ package codegen
 
 import (
 	"context"
-	"sync"
+	"crypto/rand"
+	"fmt"
+	"io"
 
 	"tinyurl/internal/link/ports"
 )
 
-const base62Alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const (
+	base62Alphabet    = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	defaultCodeLength = 8
+	unbiasedByteLimit = 256 - (256 % len(base62Alphabet))
+)
 
 var _ ports.CodeGenerator = (*Base62Generator)(nil)
 
+// Base62Generator creates independently generated, URL-safe random codes.
 type Base62Generator struct {
-	mu      sync.Mutex
-	counter uint64
+	reader io.Reader
+	length int
 }
 
 func NewBase62Generator() *Base62Generator {
-	return &Base62Generator{}
+	return &Base62Generator{
+		reader: rand.Reader,
+		length: defaultCodeLength,
+	}
 }
 
 func (g *Base62Generator) Generate(ctx context.Context) (string, error) {
@@ -25,31 +35,29 @@ func (g *Base62Generator) Generate(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	code := make([]byte, 0, g.length)
+	randomBytes := make([]byte, g.length)
 
-	g.counter++
+	for len(code) < g.length {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 
-	return encodeBase62(g.counter), nil
-}
+		if _, err := io.ReadFull(g.reader, randomBytes); err != nil {
+			return "", fmt.Errorf("read random bytes: %w", err)
+		}
 
-func encodeBase62(n uint64) string {
-	if n == 0 {
-		return "0"
+		for _, value := range randomBytes {
+			if int(value) >= unbiasedByteLimit {
+				continue
+			}
+
+			code = append(code, base62Alphabet[int(value)%len(base62Alphabet)])
+			if len(code) == g.length {
+				break
+			}
+		}
 	}
 
-	const base = uint64(len(base62Alphabet))
-
-	var encoded []byte
-	for n > 0 {
-		remainder := n % base
-		encoded = append(encoded, base62Alphabet[remainder])
-		n = n / base
-	}
-
-	for left, right := 0, len(encoded)-1; left < right; left, right = left+1, right-1 {
-		encoded[left], encoded[right] = encoded[right], encoded[left]
-	}
-
-	return string(encoded)
+	return string(code), nil
 }
