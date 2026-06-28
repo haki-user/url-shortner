@@ -125,7 +125,7 @@ and renews the certificate.
 
 ## CI/CD
 
-CI runs on pull requests and pushes to `dev` and `main`:
+CI runs on pull requests targeting `main` and pushes to `main`:
 
 ```text
 go test -race ./...
@@ -143,7 +143,14 @@ run migrations and deploy remotely
 verify https://<domain>/readyz
 ```
 
-After the first manual deployment succeeds, add a `push` trigger for `main`.
+Development flow:
+
+```text
+dev -> pull request -> CI -> review -> merge to main
+```
+
+After the first manual deployment succeeds, add a `push` trigger for `main` to
+the CD workflow. Deployment must never trigger directly from `dev`.
 
 GitHub `production` environment secrets:
 
