@@ -124,6 +124,10 @@ command. See [Container Deployment](docs/deployment/container.md) for image
 builds, the local Compose app profile, migration semantics, health probes, and
 the cloud runtime contract.
 
+The initial cloud target is documented in
+[Azure Deployment](docs/deployment/azure.md). GitHub Actions CI runs Go tests,
+vet, and a production image build before Azure CD is enabled.
+
 ## Health Endpoints
 
 - `GET /healthz` is a liveness check. It returns `200` while the process can
