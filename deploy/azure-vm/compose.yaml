@@ -44,7 +44,7 @@ services:
       TINYURL_CACHE_ACTIVE_TTL: 60s
       TINYURL_CACHE_INACTIVE_TTL: 30s
       TINYURL_ADDR: :8080
-      TINYURL_BASE_URL: https://${TINYURL_DOMAIN:?TINYURL_DOMAIN is required}
+      TINYURL_BASE_URL: ${TINYURL_PUBLIC_URL:?TINYURL_PUBLIC_URL is required}
       TINYURL_SHUTDOWN_TIMEOUT: 10s
     depends_on:
       redis:
@@ -61,7 +61,7 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
-      TINYURL_DOMAIN: ${TINYURL_DOMAIN:?TINYURL_DOMAIN is required}
+      TINYURL_SITE_ADDRESS: ${TINYURL_PUBLIC_URL:?TINYURL_PUBLIC_URL is required}
     ports:
       - "80:80"
       - "443:443"

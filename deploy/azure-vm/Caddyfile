@@ -1,4 +1,4 @@
-{$TINYURL_DOMAIN} {
+{$TINYURL_SITE_ADDRESS} {
 	encode zstd gzip
 
 	header {

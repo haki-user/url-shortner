@@ -2,12 +2,12 @@
 set -eu
 
 if [ "$#" -ne 4 ]; then
-	echo "usage: $0 <full-image-reference> <domain> <registry-name> <key-vault-name>" >&2
+	echo "usage: $0 <full-image-reference> <public-url> <registry-name> <key-vault-name>" >&2
 	exit 2
 fi
 
 image="$1"
-domain="$2"
+public_url="$2"
 registry="$3"
 key_vault="$4"
 deployment_dir="${TINYURL_DEPLOYMENT_DIR:-/opt/tinyurl}"
@@ -26,7 +26,7 @@ database_url="$(
 )"
 
 cat > .env <<EOF
-TINYURL_DOMAIN=$domain
+TINYURL_PUBLIC_URL=$public_url
 TINYURL_DATABASE_URL=$database_url
 AZURE_CONTAINER_REGISTRY=$registry
 EOF

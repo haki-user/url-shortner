@@ -23,7 +23,7 @@ jobs:
       RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       VM_NAME: ${{ vars.AZURE_VM_NAME }}
       KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT }}
-      TINYURL_DOMAIN: ${{ vars.TINYURL_DOMAIN }}
+      TINYURL_PUBLIC_URL: ${{ vars.TINYURL_PUBLIC_URL }}
 
     steps:
       - name: Check out repository
@@ -90,8 +90,8 @@ jobs:
             --resource-group "$RESOURCE_GROUP" \
             --name "$VM_NAME" \
             --command-id RunShellScript \
-            --scripts "sudo -u azureuser /opt/tinyurl/deploy.sh '$image' '$TINYURL_DOMAIN' '$REGISTRY_NAME' '$KEY_VAULT_NAME'" \
+            --scripts "sudo -u azureuser /opt/tinyurl/deploy.sh '$image' '$TINYURL_PUBLIC_URL' '$REGISTRY_NAME' '$KEY_VAULT_NAME'" \
             --output none
 
       - name: Verify public health
-        run: curl --fail --show-error --silent --retry 12 --retry-delay 5 "https://$TINYURL_DOMAIN/readyz"
+        run: curl --fail --show-error --silent --retry 12 --retry-delay 5 "$TINYURL_PUBLIC_URL/readyz"

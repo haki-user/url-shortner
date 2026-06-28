@@ -113,6 +113,16 @@ After infrastructure provisioning, create an `A` record:
 Do not trigger the first CD run until public DNS resolves to that address.
 Caddy needs public port 80 or 443 reachability to issue the certificate.
 
+Before DNS is configured, deploy with:
+
+```text
+TINYURL_PUBLIC_URL=http://<vm-public-ip>
+```
+
+Later, change that GitHub variable to `https://<chosen-subdomain>` and deploy
+again after the DNS record resolves. The same Caddy configuration then obtains
+and renews the certificate.
+
 ## CI/CD
 
 CI runs on pull requests and pushes to `dev` and `main`:
@@ -150,7 +160,7 @@ AZURE_RESOURCE_GROUP
 AZURE_CONTAINER_REGISTRY
 AZURE_VM_NAME
 AZURE_KEY_VAULT
-TINYURL_DOMAIN
+TINYURL_PUBLIC_URL
 ```
 
 Run
