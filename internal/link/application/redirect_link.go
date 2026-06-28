@@ -18,29 +18,34 @@ type RedirectLinkResult struct {
 }
 
 type RedirectLink struct {
-	repository ports.LinkRepository
-	clock      ports.Clock
+	resolver ports.LinkResolver
+	clock    ports.Clock
 }
 
-func NewRedirectLink(repository ports.LinkRepository, clock ports.Clock) RedirectLink {
+func NewRedirectLink(
+	resolver ports.LinkResolver,
+	clock ports.Clock,
+) RedirectLink {
 	return RedirectLink{
-		repository: repository,
-		clock:      clock,
+		resolver: resolver,
+		clock:    clock,
 	}
 }
 
-func (r RedirectLink) Execute(ctx context.Context, request RedirectLinkRequest) (RedirectLinkResult, error) {
-	link, err := r.repository.FindByCode(ctx, request.Code)
+func (r RedirectLink) Execute(
+	ctx context.Context,
+	request RedirectLinkRequest,
+) (RedirectLinkResult, error) {
+	mapping, err := r.resolver.Resolve(ctx, request.Code)
 	if err != nil {
 		return RedirectLinkResult{}, err
 	}
 
-	now := r.clock.Now()
-	if !link.CanRedirect(now) {
+	if !mapping.CanRedirect(r.clock.Now()) {
 		return RedirectLinkResult{}, ErrLinkUnavailable
 	}
 
 	return RedirectLinkResult{
-		Destination: link.Destination().String(),
+		Destination: mapping.Destination().String(),
 	}, nil
 }

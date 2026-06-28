@@ -56,7 +56,7 @@ func TestRedirectLinkActiveUnexpiredLinkRedirects(t *testing.T) {
 	repository := &redirectLinkRepositoryFake{link: link}
 	clock := &redirectLinkClockFake{now: now}
 
-	useCase := NewRedirectLink(repository, clock)
+	useCase := NewRedirectLink(NewRepositoryResolver(repository), clock)
 
 	result, err := useCase.Execute(ctx, RedirectLinkRequest{
 		Code: "abc123",
@@ -93,7 +93,7 @@ func TestRedirectLinkMissingLinkReturnsRepositoryErrorUnchanged(t *testing.T) {
 	repository := &redirectLinkRepositoryFake{err: ports.ErrLinkNotFound}
 	clock := &redirectLinkClockFake{now: now}
 
-	useCase := NewRedirectLink(repository, clock)
+	useCase := NewRedirectLink(NewRepositoryResolver(repository), clock)
 
 	result, err := useCase.Execute(ctx, RedirectLinkRequest{
 		Code: "missing",
@@ -176,7 +176,7 @@ func TestRedirectLinkUnavailableStatusesAndTimes(t *testing.T) {
 			repository := &redirectLinkRepositoryFake{link: link}
 			clock := &redirectLinkClockFake{now: tt.now}
 
-			useCase := NewRedirectLink(repository, clock)
+			useCase := NewRedirectLink(NewRepositoryResolver(repository), clock)
 
 			result, err := useCase.Execute(ctx, RedirectLinkRequest{
 				Code: "abc123",

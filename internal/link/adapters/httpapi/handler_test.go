@@ -123,7 +123,10 @@ func TestHandlerPostLinksSuccessReturnsCreatedJSON(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 	)
 
@@ -169,7 +172,10 @@ func TestHandlerPostLinksInvalidJSONReturnsBadRequest(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 	)
 
@@ -193,7 +199,10 @@ func TestHandlerGetCodeRedirectsWithLocation(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 	)
 
@@ -220,7 +229,10 @@ func TestHandlerGetMissingCodeReturnsNotFound(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 	)
 
@@ -246,7 +258,10 @@ func TestHandlerPostLinksWithIdempotencyKeyPassesKeyToCreateUseCase(t *testing.T
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock, idempotencyStore),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 	)
 
@@ -298,7 +313,7 @@ func TestHandlerPostLinksWithoutIdempotencyKeySkipsIdempotency(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock, idempotencyStore),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(application.NewRepositoryResolver(repository), clock),
 		"http://localhost:8080",
 	)
 
@@ -331,7 +346,10 @@ func TestHandlerPostLinksSameIdempotencyKeyReturnsSameCode(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock, idempotencyStore),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 	)
 
@@ -395,7 +413,10 @@ func TestHandlerGetCodeRecordsAnalyticsEvent(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 		WithAnalytics(analyticsRecorder, clock),
 	)
@@ -457,7 +478,10 @@ func TestHandlerGetCodeStillRedirectsWhenAnalyticsRecorderFails(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 		WithAnalytics(analyticsRecorder, clock),
 	)
@@ -490,7 +514,10 @@ func TestHandlerGetCodeWithoutAnalyticsRecorderStillRedirects(t *testing.T) {
 
 	handler := NewHandler(
 		application.NewCreateGeneratedLink(repository, generator, clock),
-		application.NewRedirectLink(repository, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
 		"http://localhost:8080",
 	)
 

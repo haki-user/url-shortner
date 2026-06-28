@@ -20,10 +20,13 @@ import (
 	"tinyurl/internal/link/adapters/httpapi"
 	linkmemory "tinyurl/internal/link/adapters/memory"
 	linkpostgres "tinyurl/internal/link/adapters/postgres"
+	linkredis "tinyurl/internal/link/adapters/redis"
 	"tinyurl/internal/link/adapters/system"
 	"tinyurl/internal/link/application"
 	linkports "tinyurl/internal/link/ports"
 	storagepostgres "tinyurl/internal/storage/postgres"
+
+	redisclient "github.com/redis/go-redis/v9"
 )
 
 type storageDependencies struct {
@@ -32,6 +35,12 @@ type storageDependencies struct {
 	analyticsRecorder analyticsports.RedirectEventRecorder
 	readinessChecker  health.Checker
 	cleanup           func()
+}
+
+type resolverDependencies struct {
+	resolver   linkports.LinkResolver
+	repository linkports.LinkRepository
+	cleanup    func()
 }
 
 func main() {
@@ -59,21 +68,38 @@ func run() error {
 	generator := codegen.NewBase62Generator()
 	clock := system.SystemClock{}
 
-	createGeneratedLink := application.NewCreateGeneratedLink(
+	// main is the composition root: it constructs concrete infrastructure
+	// dependencies and injects them into application components through interfaces.
+	resolverDependencies, err := buildLinkResolver(
+		cfg,
 		storage.repository,
+		clock,
+	)
+	if err != nil {
+		return fmt.Errorf("build link resolver: %w", err)
+	}
+	defer resolverDependencies.cleanup()
+
+	repository := resolverDependencies.repository
+
+	createGeneratedLink := application.NewCreateGeneratedLink(
+		repository,
 		generator,
 		clock,
 		storage.idempotencyStore,
 	)
-	redirectLink := application.NewRedirectLink(storage.repository, clock)
-	getManagedLink := application.NewGetManagedLink(storage.repository)
-	changeLinkStatus := application.NewChangeLinkStatus(storage.repository, clock)
+	redirectLink := application.NewRedirectLink(
+		resolverDependencies.resolver,
+		clock,
+	)
+	getManagedLink := application.NewGetManagedLink(repository)
+	changeLinkStatus := application.NewChangeLinkStatus(repository, clock)
 	changeLinkDestination := application.NewChangeLinkDestination(
-		storage.repository,
+		repository,
 		clock,
 	)
 	changeLinkExpiration := application.NewChangeLinkExpiration(
-		storage.repository,
+		repository,
 		clock,
 	)
 
@@ -208,6 +234,93 @@ func buildStorage(
 		return storageDependencies{}, fmt.Errorf(
 			"unsupported storage mode: %q",
 			cfg.Storage,
+		)
+	}
+}
+
+func buildLinkResolver(
+	cfg config.Config,
+	repository linkports.LinkRepository,
+	clock linkports.Clock,
+) (resolverDependencies, error) {
+	source := application.NewRepositoryResolver(repository)
+
+	switch cfg.Cache {
+	case config.CacheNone:
+		log.Println("redirect cache disabled")
+
+		return resolverDependencies{
+			resolver:   source,
+			repository: repository,
+			cleanup:    func() {},
+		}, nil
+
+	case config.CacheRedis:
+		options, err := redisclient.ParseURL(cfg.RedisURL)
+		if err != nil {
+			return resolverDependencies{}, fmt.Errorf(
+				"parse Redis URL: %w", err,
+			)
+		}
+
+		// Make per-operation context deadlines bound Redis network I/O.
+		options.ContextTimeoutEnabled = true
+
+		client := redisclient.NewClient(options)
+		cache := linkredis.NewRedirectCache(client)
+
+		cacheConfig := application.RedirectCacheConfig{
+			OperationTimeout: cfg.CacheOperationTimeout,
+			ActiveTTL:        cfg.CacheActiveTTL,
+			InactiveTTL:      cfg.CacheInactiveTTL,
+		}
+
+		resolver, err := application.NewCacheAsideResolver(
+			cache,
+			source,
+			clock,
+			cacheConfig,
+		)
+		if err != nil {
+			_ = client.Close()
+			return resolverDependencies{}, fmt.Errorf(
+				"create cache aside resolver: %w",
+				err,
+			)
+		}
+
+		refresher, err := application.NewRedirectCacheRefresher(
+			cache,
+			clock,
+			cacheConfig,
+		)
+		if err != nil {
+			_ = client.Close()
+			return resolverDependencies{}, fmt.Errorf(
+				"create redirect cache refresher: %w",
+				err,
+			)
+		}
+
+		refreshingRepository := application.NewCacheRefreshingRepository(
+			repository,
+			refresher,
+		)
+
+		log.Println("using Redis redirect cache")
+
+		return resolverDependencies{
+			resolver:   resolver,
+			repository: refreshingRepository,
+			cleanup: func() {
+				_ = client.Close()
+			},
+		}, nil
+
+	default:
+		return resolverDependencies{}, fmt.Errorf(
+			"unsupported cache mode: %q",
+			cfg.Cache,
 		)
 	}
 }

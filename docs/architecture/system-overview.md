@@ -210,6 +210,12 @@ Do not use code, owner ID, or destination URL as metric labels.
 5. Asynchronous analytics pipeline.
 6. Independent `redirectd`, CDN, multi-region reads, and emergency denylist.
 
+Before running multiple `linkd` replicas, replace the current process-local
+Base62 counter. It restarts at one after every process restart and cannot
+coordinate across replicas, so it can generate an existing code. Use a
+database/segment allocator, Snowflake-style IDs encoded as Base62, or random
+codes with bounded collision retries.
+
 ## References
 
 - [Redirect Cache Design](redirect-cache.md)

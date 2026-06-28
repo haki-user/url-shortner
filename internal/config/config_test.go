@@ -70,6 +70,41 @@ func TestLoadPostgresWithoutDatabaseURLReturnsError(t *testing.T) {
 	}
 }
 
+func TestLoadRedisCacheConfiguration(t *testing.T) {
+	clearConfigEnv(t)
+
+	t.Setenv("TINYURL_CACHE", "redis")
+	t.Setenv("TINYURL_REDIS_URL", "redis://localhost:6379")
+	t.Setenv("TINYURL_CACHE_OPERATION_TIMEOUT", "40ms")
+	t.Setenv("TINYURL_CACHE_ACTIVE_TTL", "5m")
+	t.Setenv("TINYURL_CACHE_INACTIVE_TTL", "45s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if cfg.Cache != CacheRedis {
+		t.Fatalf("expected cache %q, got %q", CacheRedis, cfg.Cache)
+	}
+
+	if cfg.RedisURL != "redis://localhost:6379" {
+		t.Fatalf("unexpected Redis URL %q", cfg.RedisURL)
+	}
+
+	if cfg.CacheOperationTimeout != 40*time.Millisecond {
+		t.Fatalf("expected operation timeout 40ms, got %s", cfg.CacheOperationTimeout)
+	}
+
+	if cfg.CacheActiveTTL != 5*time.Minute {
+		t.Fatalf("expected active TTL 5m, got %s", cfg.CacheActiveTTL)
+	}
+
+	if cfg.CacheInactiveTTL != 45*time.Second {
+		t.Fatalf("expected inactive TTL 45s, got %s", cfg.CacheInactiveTTL)
+	}
+}
+
 func TestLoadNormalizesStorageCaseAndWhitespace(t *testing.T) {
 	clearConfigEnv(t)
 
@@ -225,6 +260,11 @@ func clearConfigEnv(t *testing.T) {
 
 	t.Setenv("TINYURL_STORAGE", "")
 	t.Setenv("TINYURL_DATABASE_URL", "")
+	t.Setenv("TINYURL_CACHE", "")
+	t.Setenv("TINYURL_REDIS_URL", "")
+	t.Setenv("TINYURL_CACHE_OPERATION_TIMEOUT", "")
+	t.Setenv("TINYURL_CACHE_ACTIVE_TTL", "")
+	t.Setenv("TINYURL_CACHE_INACTIVE_TTL", "")
 	t.Setenv("TINYURL_ADDR", "")
 	t.Setenv("TINYURL_BASE_URL", "")
 	t.Setenv("TINYURL_SHUTDOWN_TIMEOUT", "")
