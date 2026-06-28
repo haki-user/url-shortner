@@ -2,6 +2,7 @@ param(
     [string]$ResourceGroup = "tinyurl-student-rg",
     [string]$Location = "centralindia",
     [string]$Prefix = "tinyurl",
+    [string]$VmSize = "Standard_B1s",
     [string]$SshPublicKeyPath = "$HOME\.ssh\id_ed25519.pub",
     [string]$SshSourceCidr = ""
 )
@@ -22,7 +23,13 @@ if ([string]::IsNullOrWhiteSpace($SshSourceCidr)) {
 $sshPublicKey = (Get-Content -LiteralPath $SshPublicKeyPath -Raw).Trim()
 
 $randomBytes = [byte[]]::new(24)
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($randomBytes)
+$randomNumberGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $randomNumberGenerator.GetBytes($randomBytes)
+}
+finally {
+    $randomNumberGenerator.Dispose()
+}
 $postgresPassword = (
     [Convert]::ToBase64String($randomBytes).
         TrimEnd("=").
@@ -51,11 +58,18 @@ foreach ($provider in $requiredProviders) {
     }
 }
 
-az group create `
-    --name $ResourceGroup `
-    --location $Location `
-    --tags project=tinyurl environment=student-demo `
-    --output none
+$resourceGroupExists = az group exists --name $ResourceGroup
+if ($resourceGroupExists -eq "false") {
+    az group create `
+        --name $ResourceGroup `
+        --location $Location `
+        --tags project=tinyurl environment=student-demo `
+        --output none
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Azure resource group creation failed"
+    }
+}
 
 $parameters = @{
     '$schema'      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#"
@@ -63,6 +77,7 @@ $parameters = @{
     parameters     = @{
         location                  = @{ value = $Location }
         prefix                    = @{ value = $Prefix }
+        vmSize                    = @{ value = $VmSize }
         sshPublicKey              = @{ value = $sshPublicKey }
         sshSourceCidr             = @{ value = $SshSourceCidr }
         postgresAdminPassword     = @{ value = $postgresPassword }
@@ -75,13 +90,18 @@ try {
         ConvertTo-Json -Depth 10 |
         Set-Content -LiteralPath $parameterFile -NoNewline
 
-    $deployment = az deployment group create `
+    $deploymentJSON = az deployment group create `
         --name "tinyurl-infrastructure" `
         --resource-group $ResourceGroup `
         --template-file "$PSScriptRoot\main.bicep" `
         --parameters "@$parameterFile" `
-        --query properties.outputs |
-        ConvertFrom-Json
+        --query properties.outputs
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Azure infrastructure deployment failed"
+    }
+
+    $deployment = $deploymentJSON | ConvertFrom-Json
 }
 finally {
     Remove-Item -LiteralPath $parameterFile -Force
@@ -92,6 +112,7 @@ finally {
     ResourceGroup           = $ResourceGroup
     Location                = $Location
     VmName                  = $deployment.vmName.value
+    VmSize                  = $VmSize
     VmPublicIP              = $deployment.vmPublicIP.value
     ContainerRegistry       = $deployment.registryName.value
     ContainerRegistryServer = $deployment.registryLoginServer.value

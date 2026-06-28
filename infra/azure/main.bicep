@@ -11,6 +11,9 @@ param prefix string = 'tinyurl'
 @description('Linux VM administrator username.')
 param vmAdminUsername string = 'azureuser'
 
+@description('Student free-tier VM size available in the selected region.')
+param vmSize string = 'Standard_B1s'
+
 @description('SSH public key used for emergency VM access.')
 param sshPublicKey string
 
@@ -245,7 +248,7 @@ resource vm 'Microsoft.Compute/virtualMachines@2024-07-01' = {
   }
   properties: {
     hardwareProfile: {
-      vmSize: 'Standard_B1s'
+      vmSize: vmSize
     }
     osProfile: {
       computerName: vmName
@@ -305,7 +308,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false
     sku: {
       family: 'A'
       name: 'standard'

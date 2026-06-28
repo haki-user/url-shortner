@@ -48,8 +48,9 @@ Before provisioning:
 
 1. Confirm the three benefits in Azure Portal's **Free services** page.
 2. Create a Cost Management budget alert.
-3. Use `Standard_B1s`, `Standard_B1ms`, 32 GB PostgreSQL storage, and
-   Standard LRS VM disk exactly as declared.
+3. Use an eligible `Standard_B1s`, `Standard_B2ats_v2`, or
+   `Standard_B2pts_v2` VM, plus `Standard_B1ms`, 32 GB PostgreSQL storage,
+   and Standard LRS VM disk.
 4. Check Cost Analysis after 24 hours.
 5. Delete the resource group when the demonstration is no longer needed.
 
