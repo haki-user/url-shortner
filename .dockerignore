@@ -1,0 +1,9 @@
+.git
+.gitignore
+.cache
+.env
+.env.*
+!.env.example
+*.log
+commit_out.txt
+outputs

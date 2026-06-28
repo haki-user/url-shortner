@@ -77,16 +77,17 @@ Invoke-RestMethod -Method Post http://localhost:8080/v1/links `
   -Body '{"destination":"https://example.com","ownerId":"owner-1"}'
 ```
 
-The first generated short URL should be:
+The generated response contains a random eight-character Base62 code, for
+example:
 
 ```text
-http://localhost:8080/1
+http://localhost:8080/iI6219HM
 ```
 
 Verify the redirect without following it:
 
 ```powershell
-Invoke-WebRequest http://localhost:8080/1 -MaximumRedirection 0 -SkipHttpErrorCheck
+Invoke-WebRequest <shortUrl-from-create-response> -MaximumRedirection 0 -SkipHttpErrorCheck
 ```
 
 Expected result:
@@ -102,6 +103,11 @@ Location: https://example.com
 |---|---|---|
 | `TINYURL_STORAGE` | `memory` | Storage adapter: `memory` or `postgres` |
 | `TINYURL_DATABASE_URL` | none | Postgres connection URL; required with Postgres storage |
+| `TINYURL_CACHE` | `none` | Redirect cache adapter: `none` or `redis` |
+| `TINYURL_REDIS_URL` | none | Redis connection URL; required with Redis cache |
+| `TINYURL_CACHE_OPERATION_TIMEOUT` | `25ms` | Maximum duration of one Redis operation |
+| `TINYURL_CACHE_ACTIVE_TTL` | `60s` | Default TTL for active redirect mappings |
+| `TINYURL_CACHE_INACTIVE_TTL` | `30s` | Default TTL for disabled/deleted mappings |
 | `TINYURL_ADDR` | `:8080` | Address on which the HTTP server listens |
 | `TINYURL_BASE_URL` | `http://localhost:8080` | Public URL used when returning short links |
 | `TINYURL_SHUTDOWN_TIMEOUT` | `10s` | Maximum time allowed for graceful HTTP shutdown |
@@ -110,6 +116,13 @@ Use [.env.example](.env.example) as a local configuration template. The Go
 service reads operating-system environment variables and does not automatically
 load a `.env` file. Development tooling or the shell must load those values
 before starting the service.
+
+## Container Deployment
+
+The production image contains the HTTP service and a one-shot migration
+command. See [Container Deployment](docs/deployment/container.md) for image
+builds, the local Compose app profile, migration semantics, health probes, and
+the cloud runtime contract.
 
 ## Health Endpoints
 
