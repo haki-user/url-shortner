@@ -48,6 +48,11 @@ Domain and application packages must not import infrastructure-specific packages
 
 ## Design Reference
 
+- [Visual Architecture Guide](docs/architecture/visual-guide.md) is the main
+  HLD-to-LLD view of the system, runtime flows, domain, and data model.
+- [Project Visual Map](docs/architecture/project_mindmap.md) is the quickest
+  way to understand the Go patterns, interfaces, adapters, and object wiring
+  used by the current code.
 - [System Architecture](docs/architecture/system-overview.md) is the
   authoritative current-versus-target overview.
 - [Redirect Cache Design](docs/architecture/redirect-cache.md) defines the next

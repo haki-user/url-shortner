@@ -1,0 +1,103 @@
+digraph TinyURLServiceLLD {
+  graph [
+    rankdir=LR,
+    bgcolor="#ffffff",
+    pad="0.3",
+    nodesep="0.4",
+    ranksep="0.72",
+    splines=polyline,
+    fontname="Segoe UI",
+    fontsize=20,
+    labelloc=t,
+    label="linkd low-level component map"
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Segoe UI",
+    fontsize=10,
+    color="#94a3b8",
+    fillcolor="#ffffff",
+    fontcolor="#0f172a",
+    margin="0.15,0.1"
+  ];
+  edge [
+    color="#334155",
+    fontcolor="#475569",
+    fontname="Segoe UI",
+    fontsize=8,
+    arrowsize=0.7,
+    penwidth=1.25
+  ];
+
+  main [
+    label="COMPOSITION ROOT\ncmd/linkd/main.go\n\nloads config\nselects storage\nconstructs + injects objects\nstarts + stops server",
+    fillcolor="#e2e8f0",
+    color="#64748b",
+    penwidth=2
+  ];
+
+  inbound [
+    label="INBOUND HTTP ADAPTERS\ninternal/link/adapters/httpapi\n\nHandler\nManagementHandler\n\nhealth.Handler",
+    fillcolor="#dbeafe",
+    color="#2563eb",
+    penwidth=1.8
+  ];
+
+  application [
+    label="APPLICATION USE CASES\ninternal/link/application\n\nCreateGeneratedLink\nRedirectLink\nGetManagedLink\nChangeLinkStatus\nChangeLinkDestination\nChangeLinkExpiration",
+    fillcolor="#fef3c7",
+    color="#d97706",
+    penwidth=1.8
+  ];
+
+  domain [
+    label="DOMAIN MODEL\ninternal/link/domain\n\nLink aggregate\nDestinationURL value object\nLinkStatus state machine\n\nanalytics.RedirectEvent",
+    fillcolor="#dcfce7",
+    color="#16a34a",
+    penwidth=1.8
+  ];
+
+  ports [
+    label="PORTS / INTERFACES\ninternal/link/ports\n\nLinkRepository\nIdempotencyStore\nCodeGenerator\nClock\n\nanalytics.RedirectEventRecorder\nhealth.Checker",
+    fillcolor="#ede9fe",
+    color="#7c3aed",
+    penwidth=2
+  ];
+
+  adapters [
+    label="OUTBOUND ADAPTERS\n\nmemory/*\npostgres/*\ncodegen.Base62Generator\nsystem.SystemClock\nhealth.CheckerFunc",
+    fillcolor="#cffafe",
+    color="#0891b2",
+    penwidth=1.8
+  ];
+
+  resources [
+    label="EXTERNAL / PROCESS RESOURCES\n\npgxpool.Pool -> Postgres\nin-memory maps + mutexes\nsystem time\ncrypto/rand",
+    fillcolor="#ffedd5",
+    color="#ea580c",
+    penwidth=1.8
+  ];
+
+  main -> inbound [label="constructs"];
+  main -> application [label="constructs + injects", style=dotted, color="#64748b"];
+  main -> adapters [label="selects concrete types", style=dotted, color="#64748b"];
+  inbound -> application [label="calls Execute"];
+  inbound -> ports [label="records analytics / checks readiness", constraint=false];
+  application -> domain [label="creates + invokes behavior", color="#15803d"];
+  application -> ports [label="depends on contracts"];
+  ports -> adapters [
+    label="implemented implicitly",
+    style=dashed,
+    color="#7c3aed",
+    fontcolor="#7c3aed",
+    arrowhead=empty
+  ];
+  adapters -> domain [
+    label="rehydrates / accepts domain values",
+    color="#15803d",
+    constraint=false
+  ];
+  adapters -> resources [label="performs I/O"];
+}

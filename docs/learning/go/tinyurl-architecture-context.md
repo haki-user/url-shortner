@@ -153,9 +153,9 @@ Each request begins with a request context. Individual external calls may derive
 
 ```text
 HTTP request context
-├── URL-store lookup context with timeout
-├── cache lookup context with timeout
-└── event-publication context with timeout
+|-- URL-store lookup context with timeout
+|-- cache lookup context with timeout
+`-- event-publication context with timeout
 ```
 
 These contexts differ because each operation has a different lifetime and cancellation policy.
@@ -185,13 +185,17 @@ This is optimistic concurrency control.
 
 ## How a Request Will Eventually Flow
 
-```mermaid
-flowchart LR
-    HTTP["HTTP Handler"] --> UseCase["Create Link Use Case"]
-    UseCase --> Clock["Clock Port"]
-    UseCase --> Domain["Link Domain"]
-    UseCase --> Repo["LinkRepository Port"]
-    Repo --> DB["Database Adapter"]
+```text
+HTTP Handler
+    |
+    v
+Create Link Use Case
+    |
+    |---> Clock Port -------> System Clock
+    |
+    |---> Link Domain
+    |
+    `---> LinkRepository ---> Database Adapter
 ```
 
 The interfaces make the use case testable:

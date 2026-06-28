@@ -13,10 +13,19 @@ This handbook explains Go through the TinyURL project. It is organized so you ca
 3. [TinyURL Architecture Context](tinyurl-architecture-context.md)  
    Connects Go language features to this repository's domain, ports, application, and adapter layers.
 
-4. [Go Cheat Sheet](cheat-sheet.md)  
+4. [Visual Architecture Guide](../../architecture/visual-guide.md)
+   Shows the whole system from production HLD through service LLD, runtime flows, domain, and data.
+
+5. [Project Visual Map](../../architecture/project_mindmap.md)
+   Explains the Go patterns, interfaces, adapters, and object wiring used by the current code.
+
+6. [Redirect Caching Mental Model](redirect-caching-mental-model.md)
+   Shows how Redis connects to the current system at both HLD and LLD levels.
+
+7. [Go Cheat Sheet](cheat-sheet.md)
    Quick syntax and decision reference to keep open while coding.
 
-5. [Question Log](question-log.md)  
+8. [Question Log](question-log.md)
    A living record of doubts, concise answers, and concepts worth revisiting.
 
 ## How to Use This Handbook

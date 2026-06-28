@@ -1,0 +1,78 @@
+digraph TinyURLDomainModel {
+  graph [
+    rankdir=LR,
+    bgcolor="#ffffff",
+    pad="0.35",
+    nodesep="0.48",
+    ranksep="0.78",
+    splines=polyline,
+    fontname="Segoe UI",
+    fontsize=20,
+    labelloc=t,
+    label="Link domain model and lifecycle"
+  ];
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Segoe UI",
+    fontsize=10,
+    color="#16a34a",
+    fillcolor="#f0fdf4",
+    fontcolor="#0f172a",
+    margin="0.16,0.1"
+  ];
+  edge [
+    color="#15803d",
+    fontcolor="#166534",
+    fontname="Segoe UI",
+    fontsize=8,
+    arrowsize=0.7,
+    penwidth=1.3
+  ];
+
+  constructors [
+    label="CREATION PATHS\n\nNewLink\nnew valid aggregate, version 1\n\nRehydrateLink\nvalidate stored fields and rebuild",
+    fillcolor="#ecfdf5",
+    color="#059669"
+  ];
+
+  link [
+    label="LINK AGGREGATE ROOT\n\nprivate state\ncode | destination | ownerID | status\ncreatedAt | updatedAt | expiresAt | version\n\nqueries\nCanRedirect | IsExpired | getters\n\ncommands\nDisable | Reactivate | Delete\nUpdateDestination\nSetExpiration | ClearExpiration",
+    fillcolor="#dcfce7",
+    color="#16a34a",
+    penwidth=2.4
+  ];
+
+  destination [
+    label="DestinationURL\nVALUE OBJECT\n\nabsolute HTTP/HTTPS URL\nvalidated at construction\ncompared by value",
+    fillcolor="#eff6ff",
+    color="#2563eb"
+  ];
+
+  status_policy [
+    label="LinkStatus\nSTATE POLICY\n\nActive | Disabled | Deleted\nCanRedirect\nCanTransitionTo",
+    fillcolor="#faf5ff",
+    color="#7c3aed"
+  ];
+
+  invariants [
+    label="INVARIANTS\n\nexpiration after creation/current mutation\nmutation time strictly increases\ndeleted is terminal\nsuccessful mutation increments version\nfields cannot be assigned externally",
+    shape=note,
+    fillcolor="#fffbeb",
+    color="#d97706"
+  ];
+
+  active [label="ACTIVE\nredirect allowed\nwhen unexpired", fillcolor="#dcfce7"];
+  disabled [label="DISABLED\nredirect blocked", fillcolor="#fef3c7", color="#d97706"];
+  deleted [label="DELETED\nterminal", fillcolor="#fee2e2", color="#dc2626"];
+
+  constructors -> link [label="returns"];
+  link -> destination [label="contains", arrowhead=diamond];
+  link -> status_policy [label="contains", arrowhead=diamond];
+  link -> invariants [label="enforces", color="#d97706", fontcolor="#b45309"];
+  status_policy -> active [label="initial"];
+  active -> disabled [label="Disable"];
+  disabled -> active [label="Reactivate"];
+  active -> deleted [label="Delete", color="#dc2626", fontcolor="#b91c1c"];
+  disabled -> deleted [label="Delete", color="#dc2626", fontcolor="#b91c1c"];
+}
