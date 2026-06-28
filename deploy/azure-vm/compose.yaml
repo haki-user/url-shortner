@@ -1,0 +1,85 @@
+name: tinyurl
+
+services:
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  migrate:
+    profiles: ["migration"]
+    image: ${TINYURL_IMAGE:?TINYURL_IMAGE is required}
+    entrypoint: ["/app/migrate"]
+    environment:
+      TINYURL_DATABASE_URL: ${TINYURL_DATABASE_URL:?TINYURL_DATABASE_URL is required}
+      TINYURL_MIGRATIONS_DIR: /app/migrations/postgres
+    networks:
+      - backend
+
+  linkd:
+    image: ${TINYURL_IMAGE:?TINYURL_IMAGE is required}
+    restart: unless-stopped
+    environment:
+      TINYURL_STORAGE: postgres
+      TINYURL_DATABASE_URL: ${TINYURL_DATABASE_URL:?TINYURL_DATABASE_URL is required}
+      TINYURL_CACHE: redis
+      TINYURL_REDIS_URL: redis://redis:6379
+      TINYURL_CACHE_OPERATION_TIMEOUT: 25ms
+      TINYURL_CACHE_ACTIVE_TTL: 60s
+      TINYURL_CACHE_INACTIVE_TTL: 30s
+      TINYURL_ADDR: :8080
+      TINYURL_BASE_URL: https://${TINYURL_DOMAIN:?TINYURL_DOMAIN is required}
+      TINYURL_SHUTDOWN_TIMEOUT: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      TINYURL_DOMAIN: ${TINYURL_DOMAIN:?TINYURL_DOMAIN is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      linkd:
+        condition: service_healthy
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
