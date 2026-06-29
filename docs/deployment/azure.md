@@ -159,7 +159,7 @@ replicas would not create a coherent shared cache.
 | Area | Student deployment | Production-scale target |
 |---|---|---|
 | API minimum replicas | Zero; accepts cold starts | One or more warm replicas |
-| API maximum replicas | Three; cost guardrail | Load-tested limit with a database connection budget |
+| API maximum replicas | One; strict student cost guardrail | Load-tested limit with a database connection budget |
 | Redis | Disposable Redis on private free-service-eligible VM | Azure Managed Redis with replication and Private Link |
 | PostgreSQL | Single B1ms, seven-day backups | Zone-redundant HA, tested restores and read replicas |
 | Logging | Application stdout only | Central logs, metrics, traces, alerts and retention |
@@ -235,3 +235,198 @@ the custom hostname.
 - Authentication, rate limiting, cache metrics, tracing, and alerts remain
   backlog work.
 - The single-region database is still the authoritative regional dependency.
+
+## Cost Guardrails
+
+The public API can receive arbitrary internet traffic. Azure budgets are
+alerts, not hard stops, so the strongest live guardrail is keeping scale-out
+small and having a fast kill switch.
+
+Normal cost-guarded public mode:
+
+```powershell
+$env:Path = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;$env:Path"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\infra\azure\apply-cost-guardrails.ps1
+```
+
+This keeps:
+
+```text
+tinyurl-api minReplicas = 0
+tinyurl-api maxReplicas = 1
+```
+
+Create or refresh the monthly budget alert:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\infra\azure\create-budget-alert.ps1 `
+  -AmountUsd 5 `
+  -ContactEmail "Adityapratapsingh33@outlook.com"
+```
+
+The budget is scoped to `tinyurl-student-rg` and sends email at 50%, 80%, and
+100% actual spend. It warns; it does not stop Azure resources.
+
+Emergency mode, disable the public API but keep Redis/VM running:
+
+```powershell
+$env:Path = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;$env:Path"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\infra\azure\disable-public-api.ps1
+```
+
+Deeper emergency mode, disable the public API and deallocate the utility VM:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\infra\azure\disable-public-api.ps1 `
+  -DeallocateUtilityVm
+```
+
+Restore public API:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\infra\azure\restore-public-api.ps1
+```
+
+Current hard cost boundaries:
+
+- no public IP resource;
+- no Azure Bastion;
+- no Azure VPN Gateway;
+- no Redis Container App;
+- public API scales from zero to at most one replica;
+- Redis memory is capped at 128 MB;
+- VM compute uses `Standard_B2ats_v2`, which is Azure for Students
+  free-service eligible for 750 hours/month.
+
+Remaining cost exposure:
+
+- the utility VM OS disk;
+- PostgreSQL/ACR/Key Vault/private DNS;
+- public Container Apps request/compute/bandwidth while ingress is enabled;
+- VM compute if the free-service allowance is exhausted.
+
+## Tailscale And DBeaver
+
+Tailscale is installed on `tinyurl-utility-vm`, but it is not joined to a
+tailnet until you run `tailscale up`.
+
+Create a Tailscale auth key:
+
+1. Open Tailscale admin console.
+2. Go to **Settings -> Keys -> Generate auth key**.
+3. Use an ephemeral or reusable key for this VM.
+4. Treat the key like a password. Do not commit it.
+
+Join the utility VM to Tailscale and advertise the Azure VNet route:
+
+```powershell
+$env:TS_AUTH_KEY = "<paste-auth-key-here>"
+
+$script = @"
+sudo tailscale up `
+  --auth-key $env:TS_AUTH_KEY `
+  --ssh `
+  --advertise-routes=10.20.0.0/16
+"@
+
+$tmp = New-TemporaryFile
+Set-Content -Path $tmp -Value $script -NoNewline
+
+az vm run-command invoke `
+  --resource-group tinyurl-student-rg `
+  --name tinyurl-utility-vm `
+  --command-id RunShellScript `
+  --scripts "@$tmp" `
+  --query "value[].message" `
+  --output tsv
+
+Remove-Item $tmp -Force
+Remove-Item Env:\TS_AUTH_KEY
+```
+
+Then approve the route in Tailscale:
+
+```text
+Tailscale admin console
+-> Machines
+-> tinyurl-utility-vm
+-> Subnet routes
+-> approve 10.20.0.0/16
+```
+
+Install Tailscale on your laptop and connect to the same tailnet. After route
+approval, your laptop should be able to reach private Azure addresses such as
+`10.20.4.4`.
+
+Optional connectivity checks from your laptop:
+
+```powershell
+tailscale status
+Test-NetConnection 10.20.4.4 -Port 6379
+```
+
+Get the Postgres password from Key Vault. If your user has not been granted
+secret access yet, first grant yourself `Key Vault Secrets Officer`:
+
+```powershell
+$vaultId = az keyvault show `
+  -g tinyurl-student-rg `
+  -n tinyurl-kv-7yycx7ze3vtdu `
+  --query id `
+  -o tsv
+
+az role assignment create `
+  --assignee dc5f3d67-039b-48bd-83e1-da027ef4514e `
+  --role "Key Vault Secrets Officer" `
+  --scope $vaultId
+```
+
+Read the database URL:
+
+```powershell
+az keyvault secret show `
+  --vault-name tinyurl-kv-7yycx7ze3vtdu `
+  --name tinyurl-database-url `
+  --query value `
+  -o tsv
+```
+
+DBeaver settings when Tailscale subnet routing is approved:
+
+```text
+Driver: PostgreSQL
+Host: tinyurl-pg-7yycx7ze3vtdu.postgres.database.azure.com
+Port: 5432
+Database: tinyurl
+Username: tinyurladmin
+Password: value from Key Vault connection string
+SSL mode: require
+```
+
+If DNS does not resolve from your laptop through Tailscale, use the private IP
+resolved from the VM:
+
+```powershell
+$script = "getent hosts tinyurl-pg-7yycx7ze3vtdu.postgres.database.azure.com"
+$tmp = New-TemporaryFile
+Set-Content -Path $tmp -Value $script -NoNewline
+
+az vm run-command invoke `
+  -g tinyurl-student-rg `
+  -n tinyurl-utility-vm `
+  --command-id RunShellScript `
+  --scripts "@$tmp" `
+  --query "value[].message" `
+  -o tsv
+
+Remove-Item $tmp -Force
+```
+
+Then put that private IP in DBeaver host and keep SSL mode as `require`.

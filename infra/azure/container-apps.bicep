@@ -27,6 +27,10 @@ param deployRedisContainerApp bool = false
 @description('Redis connection URL used when deployRedisContainerApp is false.')
 param redisURL string = 'redis://10.20.4.4:6379'
 
+@description('Hard cost guardrail for public API scale-out. Keep at 1 for student deployment.')
+@minValue(1)
+param apiMaxReplicas int = 1
+
 var environmentName = '${prefix}-environment'
 var applicationName = '${prefix}-api'
 var redisName = '${prefix}-redis'
@@ -365,7 +369,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       ]
       scale: {
         minReplicas: 0
-        maxReplicas: 3
+        maxReplicas: apiMaxReplicas
         rules: [
           {
             name: 'http'
