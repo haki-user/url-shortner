@@ -83,7 +83,7 @@ if ($CustomDomain.Trim() -ne "") {
     PlatformURL         = $deployment.platformURL.value
     MigrationJob        = $deployment.migrationJobName.value
     ManagedIdentity     = $deployment.managedIdentityName.value
-    Redis               = $deployment.redisName.value
+    RedisURL            = $deployment.redisURL.value
     MinimumReplicas     = 0
-    RedirectCache       = "private Redis Container App, one replica"
+    RedirectCache       = "private utility VM Redis"
 } | Format-List

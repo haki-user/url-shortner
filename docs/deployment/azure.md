@@ -16,14 +16,13 @@ Azure Container Registry
     v
 Azure Container Apps Consumption
 |-- tinyurl-migrate  manual one-shot job
-|-- tinyurl-redis    internal TCP, exactly one replica
 `-- tinyurl-api      HTTPS ingress, 0-3 replicas
           |
           | custom domain + managed TLS
           v
     https://tinyurl.haki-user.in
           | \
-          |  `-> private Redis cache
+          |  `-> private utility VM Redis at 10.20.4.4:6379
           |
           `-> private VNet + private DNS
                     |
@@ -32,23 +31,25 @@ Azure PostgreSQL Flexible Server B1ms
 ```
 
 PostgreSQL remains authoritative. Redirect reads use a shared, private Redis
-Container App through the implemented versioned cache-aside resolver. Redis is
-disposable: it has no persistence, uses a 128 MB memory cap with `allkeys-lru`
-eviction, and can be rebuilt entirely from PostgreSQL.
+instance on the utility VM through the implemented versioned cache-aside
+resolver. Redis is disposable: it has no persistence, uses a 128 MB memory cap
+with `allkeys-lru` eviction, and can be rebuilt entirely from PostgreSQL.
 
 ## Cost Model
 
-Container Apps Consumption can scale the API to zero replicas. Redis remains
-at one replica so shared cache state is available when the API wakes. The
-environment uses platform-managed ingress, so this deployment does not create
-a dedicated VM disk or Azure Public IP resource.
+Container Apps Consumption can scale the API to zero replicas. Redis runs on a
+single private `Standard_B2ats_v2` utility VM because Azure for Students lists
+750 free hours/month for this VM size, which covers one always-on VM in a
+normal month. The VM has no public IP, no Bastion, no backup, no extra data
+disk, and boot diagnostics disabled.
 
-The retired VM topology incurred separate charges for:
+The utility VM still creates one unavoidable managed OS disk:
 
-- a Standard static public IPv4 address, billed until the IP resource is
-  deleted even when detached;
-- a provisioned Standard HDD OS disk;
-- compute beyond any applicable student allowance.
+- `tinyurl-utility-vm-osdisk`, `Standard_LRS`, 30 GB.
+
+Do not add public IPs, Bastion, VPN Gateway, VM backups, snapshots, extra disks,
+or larger VM SKUs without first checking Cost Analysis and the student free
+service limits.
 
 PostgreSQL, ACR, Key Vault, network usage, and usage beyond Container Apps
 grants can still consume student credit. Check Cost Analysis and keep a budget
@@ -61,6 +62,8 @@ alert enabled.
 - PostgreSQL remains in its delegated private subnet.
 - Container Apps reaches PostgreSQL through a dedicated delegated `/27`
   subnet and the existing private DNS zone.
+- Container Apps reaches Redis through the private VNet only. The utility VM
+  NSG allows Redis from `VirtualNetwork` and exposes no public inbound path.
 - The database URL remains in Azure Key Vault.
 - A user-assigned managed identity receives only `AcrPull` and
   `Key Vault Secrets User`.
@@ -79,9 +82,17 @@ adds the application resources to that foundation:
 - delegated `container-apps` subnet at `10.20.3.0/27`;
 - Consumption workload-profile environment;
 - `tinyurl-api` container app with managed HTTPS and HTTP scaling from zero;
-- private `tinyurl-redis` app with internal TCP ingress and one replica;
 - `tinyurl-migrate` manually triggered migration job;
 - user-assigned identity and narrow ACR/Key Vault role assignments.
+
+[`infra/azure/utility-vm.bicep`](../../infra/azure/utility-vm.bicep) defines
+the private utility VM:
+
+- `Standard_B2ats_v2` Linux VM;
+- static private IP `10.20.4.4`;
+- no public IP;
+- `utility` subnet at `10.20.4.0/24`;
+- NSG allowing Redis only from the virtual network.
 
 Provision against the immutable image already in ACR:
 
@@ -125,7 +136,7 @@ replicas would not create a coherent shared cache.
 |---|---|---|
 | API minimum replicas | Zero; accepts cold starts | One or more warm replicas |
 | API maximum replicas | Three; cost guardrail | Load-tested limit with a database connection budget |
-| Redis | One disposable Container App | Azure Managed Redis with replication and Private Link |
+| Redis | Disposable Redis on private free-service-eligible VM | Azure Managed Redis with replication and Private Link |
 | PostgreSQL | Single B1ms, seven-day backups | Zone-redundant HA, tested restores and read replicas |
 | Logging | Application stdout only | Central logs, metrics, traces, alerts and retention |
 | Region | One | Multi-region redirect reads and regional failover |
