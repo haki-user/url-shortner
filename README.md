@@ -124,9 +124,9 @@ command. See [Container Deployment](docs/deployment/container.md) for image
 builds, the local Compose app profile, migration semantics, health probes, and
 the cloud runtime contract.
 
-The initial cloud target is documented in
-[Azure Deployment](docs/deployment/azure.md). GitHub Actions CI runs Go tests,
-vet, and a production image build before Azure CD is enabled.
+The Azure Container Apps deployment is documented in
+[Azure Deployment](docs/deployment/azure.md). GitHub Actions runs tests, vet,
+and a production image build before deploying successful `main` revisions.
 
 ## Health Endpoints
 

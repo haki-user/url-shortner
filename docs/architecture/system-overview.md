@@ -48,7 +48,8 @@ recording.
 | Memory and Postgres adapters | Implemented |
 | Liveness, readiness, graceful shutdown | Implemented |
 | Redirect event recording | Implemented inline |
-| Redis redirect cache | Next |
+| Versioned Redis redirect cache | Implemented; optional per deployment |
+| Azure Container Apps deployment | Implemented; scale-to-zero demo topology |
 | Durable invalidation and asynchronous analytics | Planned |
 | Verified authentication | Planned; `X-Owner-ID` is temporary |
 
@@ -204,11 +205,13 @@ Do not use code, owner ID, or destination URL as metric labels.
 
 1. **Complete:** durable single-region create, redirect, management, health, and
    analytics recording.
-2. **Next:** Redis cache-aside resolver with versioned writes.
-3. Negative caching and per-code miss coalescing.
-4. Transactional outbox and durable invalidation.
-5. Asynchronous analytics pipeline.
-6. Independent `redirectd`, CDN, multi-region reads, and emergency denylist.
+2. **Complete:** Redis cache-aside resolver with versioned writes.
+3. **Next:** verified authentication, rate limiting, and production
+   observability.
+4. Negative caching and per-code miss coalescing.
+5. Transactional outbox and durable invalidation.
+6. Asynchronous analytics pipeline.
+7. Independent `redirectd`, CDN, multi-region reads, and emergency denylist.
 
 Code creation currently uses cryptographically random eight-character Base62
 codes. Postgres enforces uniqueness, and creation retries a collision at most

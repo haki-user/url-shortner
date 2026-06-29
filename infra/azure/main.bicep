@@ -8,18 +8,6 @@ param location string = resourceGroup().location
 @maxLength(12)
 param prefix string = 'tinyurl'
 
-@description('Linux VM administrator username.')
-param vmAdminUsername string = 'azureuser'
-
-@description('Student free-tier VM size available in the selected region.')
-param vmSize string = 'Standard_B1s'
-
-@description('SSH public key used for emergency VM access.')
-param sshPublicKey string
-
-@description('CIDR allowed to connect to SSH, for example 203.0.113.10/32.')
-param sshSourceCidr string
-
 @description('PostgreSQL administrator username.')
 param postgresAdminUsername string = 'tinyurladmin'
 
@@ -29,71 +17,11 @@ param postgresAdminPassword string
 
 var suffix = uniqueString(subscription().id, resourceGroup().id)
 var compactPrefix = replace(toLower(prefix), '-', '')
-var vmName = '${prefix}-vm'
 var networkName = '${prefix}-vnet'
-var nsgName = '${prefix}-nsg'
-var publicIPName = '${prefix}-public-ip'
-var nicName = '${prefix}-nic'
 var registryName = take('${compactPrefix}${suffix}', 50)
 var postgresServerName = take('${compactPrefix}-pg-${suffix}', 63)
 var keyVaultName = take('${compactPrefix}-kv-${suffix}', 24)
 var postgresPrivateDnsZoneName = 'privatelink.postgres.database.azure.com'
-var acrPullRoleDefinitionId = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-)
-var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  '4633458b-17de-408a-b874-0445c86b69e6'
-)
-
-resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
-  name: nsgName
-  location: location
-  properties: {
-    securityRules: [
-      {
-        name: 'AllowHttps'
-        properties: {
-          priority: 100
-          access: 'Allow'
-          direction: 'Inbound'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '443'
-          sourceAddressPrefix: 'Internet'
-          destinationAddressPrefix: '*'
-        }
-      }
-      {
-        name: 'AllowHttpForAcme'
-        properties: {
-          priority: 110
-          access: 'Allow'
-          direction: 'Inbound'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '80'
-          sourceAddressPrefix: 'Internet'
-          destinationAddressPrefix: '*'
-        }
-      }
-      {
-        name: 'AllowRestrictedSsh'
-        properties: {
-          priority: 120
-          access: 'Allow'
-          direction: 'Inbound'
-          protocol: 'Tcp'
-          sourcePortRange: '*'
-          destinationPortRange: '22'
-          sourceAddressPrefix: sshSourceCidr
-          destinationAddressPrefix: '*'
-        }
-      }
-    ]
-  }
-}
 
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   name: networkName
@@ -105,15 +33,6 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' = {
       ]
     }
     subnets: [
-      {
-        name: 'vm'
-        properties: {
-          addressPrefix: '10.20.1.0/24'
-          networkSecurityGroup: {
-            id: networkSecurityGroup.id
-          }
-        }
-      }
       {
         name: 'postgres'
         properties: {
@@ -128,13 +47,22 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' = {
           ]
         }
       }
+      {
+        name: 'container-apps'
+        properties: {
+          addressPrefix: '10.20.3.0/27'
+          delegations: [
+            {
+              name: 'container-apps'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
+        }
+      }
     ]
   }
-}
-
-resource vmSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
-  name: 'vm'
-  parent: virtualNetwork
 }
 
 resource postgresSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
@@ -208,98 +136,6 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   }
 }
 
-resource publicIP 'Microsoft.Network/publicIPAddresses@2023-11-01' = {
-  name: publicIPName
-  location: location
-  sku: {
-    name: 'Standard'
-  }
-  properties: {
-    publicIPAllocationMethod: 'Static'
-  }
-}
-
-resource networkInterface 'Microsoft.Network/networkInterfaces@2023-11-01' = {
-  name: nicName
-  location: location
-  properties: {
-    ipConfigurations: [
-      {
-        name: 'primary'
-        properties: {
-          privateIPAllocationMethod: 'Dynamic'
-          subnet: {
-            id: vmSubnet.id
-          }
-          publicIPAddress: {
-            id: publicIP.id
-          }
-        }
-      }
-    ]
-  }
-}
-
-resource vm 'Microsoft.Compute/virtualMachines@2024-07-01' = {
-  name: vmName
-  location: location
-  identity: {
-    type: 'SystemAssigned'
-  }
-  properties: {
-    hardwareProfile: {
-      vmSize: vmSize
-    }
-    osProfile: {
-      computerName: vmName
-      adminUsername: vmAdminUsername
-      customData: base64(loadTextContent('../../deploy/azure-vm/cloud-init.yaml'))
-      linuxConfiguration: {
-        disablePasswordAuthentication: true
-        ssh: {
-          publicKeys: [
-            {
-              path: '/home/${vmAdminUsername}/.ssh/authorized_keys'
-              keyData: sshPublicKey
-            }
-          ]
-        }
-      }
-    }
-    storageProfile: {
-      imageReference: {
-        publisher: 'Canonical'
-        offer: 'ubuntu-24_04-lts'
-        sku: 'server'
-        version: 'latest'
-      }
-      osDisk: {
-        createOption: 'FromImage'
-        managedDisk: {
-          storageAccountType: 'Standard_LRS'
-        }
-      }
-    }
-    networkProfile: {
-      networkInterfaces: [
-        {
-          id: networkInterface.id
-        }
-      ]
-    }
-  }
-}
-
-resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(registry.id, vm.id, acrPullRoleDefinitionId)
-  scope: registry
-  properties: {
-    roleDefinitionId: acrPullRoleDefinitionId
-    principalId: vm.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: keyVaultName
   location: location
@@ -323,18 +159,6 @@ resource databaseURL 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
-resource keyVaultAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, vm.id, keyVaultSecretsUserRoleDefinitionId)
-  scope: keyVault
-  properties: {
-    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
-    principalId: vm.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-output vmName string = vm.name
-output vmPublicIP string = publicIP.properties.ipAddress
 output registryName string = registry.name
 output registryLoginServer string = registry.properties.loginServer
 output keyVaultName string = keyVault.name
