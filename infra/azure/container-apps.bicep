@@ -15,15 +15,20 @@ param keyVaultName string
 @description('Immutable application image tag in the existing registry.')
 param imageTag string
 
+@description('Public HTTPS origin returned in created short links.')
+param customDomain string = 'tinyurl.haki-user.in'
+
 @description('Short lowercase prefix used in resource names.')
 param prefix string = 'tinyurl'
 
 var environmentName = '${prefix}-environment'
 var applicationName = '${prefix}-api'
+var redisName = '${prefix}-redis'
 var migrationJobName = '${prefix}-migrate'
 var identityName = '${prefix}-container-identity'
 var image = '${registry.properties.loginServer}/tinyurl-linkd:${imageTag}'
-var publicURL = 'https://${applicationName}.${containerAppsEnvironment.properties.defaultDomain}'
+var redisImage = '${registry.properties.loginServer}/tinyurl-redis:7.4-alpine'
+var publicURL = 'https://${customDomain}'
 var databaseSecretURL = 'https://${keyVault.name}${environment().suffixes.keyvaultDns}/secrets/tinyurl-database-url'
 var acrPullRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
@@ -102,6 +107,94 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01'
       }
     ]
   }
+}
+
+resource redisApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: redisName
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${containerIdentity.id}': {}
+    }
+  }
+  properties: {
+    managedEnvironmentId: containerAppsEnvironment.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: false
+        targetPort: 6379
+        exposedPort: 6379
+        transport: 'tcp'
+      }
+      registries: [
+        {
+          server: registry.properties.loginServer
+          identity: containerIdentity.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'redis'
+          image: redisImage
+          command: [
+            'redis-server'
+          ]
+          args: [
+            '--save'
+            ''
+            '--appendonly'
+            'no'
+            '--bind'
+            '0.0.0.0'
+            '--protected-mode'
+            'no'
+            '--maxmemory'
+            '128mb'
+            '--maxmemory-policy'
+            'allkeys-lru'
+          ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          probes: [
+            {
+              type: 'Liveness'
+              tcpSocket: {
+                port: 6379
+              }
+              initialDelaySeconds: 3
+              periodSeconds: 30
+              timeoutSeconds: 2
+              failureThreshold: 3
+            }
+            {
+              type: 'Readiness'
+              tcpSocket: {
+                port: 6379
+              }
+              initialDelaySeconds: 1
+              periodSeconds: 10
+              timeoutSeconds: 2
+              failureThreshold: 3
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 1
+      }
+    }
+  }
+  dependsOn: [
+    acrPullAssignment
+  ]
 }
 
 resource migrationJob 'Microsoft.App/jobs@2024-03-01' = {
@@ -216,7 +309,11 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'TINYURL_CACHE'
-              value: 'none'
+              value: 'redis'
+            }
+            {
+              name: 'TINYURL_REDIS_URL'
+              value: 'redis://${redisApp.properties.configuration.ingress.fqdn}:6379'
             }
             {
               name: 'TINYURL_ADDR'
@@ -282,7 +379,9 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 output applicationName string = containerApp.name
-output applicationURL string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
+output applicationURL string = publicURL
+output platformURL string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
 output environmentName string = containerAppsEnvironment.name
 output migrationJobName string = migrationJob.name
 output managedIdentityName string = containerIdentity.name
+output redisName string = redisApp.name

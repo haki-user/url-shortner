@@ -32,7 +32,9 @@ jobs:
       REGISTRY_NAME: ${{ vars.AZURE_CONTAINER_REGISTRY }}
       RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       CONTAINER_APP_NAME: ${{ vars.AZURE_CONTAINER_APP }}
+      CONTAINER_APP_ENVIRONMENT: ${{ vars.AZURE_CONTAINER_APP_ENVIRONMENT }}
       MIGRATION_JOB_NAME: ${{ vars.AZURE_MIGRATION_JOB }}
+      CUSTOM_DOMAIN: ${{ vars.TINYURL_CUSTOM_DOMAIN }}
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
@@ -126,15 +128,51 @@ jobs:
             --image "$image" \
             --output none
 
-      - name: Verify public health
+      - name: Bind custom hostname
+        if: env.CUSTOM_DOMAIN != ''
+        shell: bash
         run: |
-          fqdn="$(
-            az containerapp show \
+          set -euo pipefail
+
+          certificate_id="$(
+            az containerapp env certificate list \
               --resource-group "$RESOURCE_GROUP" \
-              --name "$CONTAINER_APP_NAME" \
-              --query properties.configuration.ingress.fqdn \
+              --name "$CONTAINER_APP_ENVIRONMENT" \
+              --query "[?properties.subjectName=='$CUSTOM_DOMAIN'].id | [0]" \
               --output tsv
           )"
+
+          if [ -z "$certificate_id" ]; then
+            echo "managed certificate for $CUSTOM_DOMAIN was not found" >&2
+            exit 1
+          fi
+
+          az containerapp hostname add \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_APP_NAME" \
+            --hostname "$CUSTOM_DOMAIN" \
+            --output none || true
+
+          az containerapp hostname bind \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_APP_NAME" \
+            --hostname "$CUSTOM_DOMAIN" \
+            --certificate "$certificate_id" \
+            --output none
+
+      - name: Verify public health
+        run: |
+          if [ -n "$CUSTOM_DOMAIN" ]; then
+            fqdn="$CUSTOM_DOMAIN"
+          else
+            fqdn="$(
+              az containerapp show \
+                --resource-group "$RESOURCE_GROUP" \
+                --name "$CONTAINER_APP_NAME" \
+                --query properties.configuration.ingress.fqdn \
+                --output tsv
+            )"
+          fi
 
           curl \
             --fail \
