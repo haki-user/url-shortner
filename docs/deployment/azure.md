@@ -94,6 +94,30 @@ the private utility VM:
 - `utility` subnet at `10.20.4.0/24`;
 - NSG allowing Redis only from the virtual network.
 
+[`infra/azure/configure-utility-vm.ps1`](../../infra/azure/configure-utility-vm.ps1)
+configures software inside the utility VM through Azure Run Command:
+
+- Redis server with no persistence, 128 MB max memory, and `allkeys-lru`;
+- Tailscale client and `tailscaled`;
+- IPv4/IPv6 forwarding for later subnet-router use.
+
+Tailscale is installed but not joined to a tailnet by default. Joining requires
+a real auth key or interactive browser login:
+
+```bash
+sudo tailscale up --ssh --advertise-routes=10.20.0.0/16
+```
+
+If using an auth key, pass it only inside a trusted shell session and do not
+commit it:
+
+```bash
+sudo tailscale up --auth-key <tailscale-auth-key> --ssh --advertise-routes=10.20.0.0/16
+```
+
+Approve the advertised route in the Tailscale admin console before expecting
+laptop-to-VNet connectivity.
+
 Provision against the immutable image already in ACR:
 
 ```powershell
