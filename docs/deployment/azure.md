@@ -1,9 +1,9 @@
-# Azure VM Deployment
+# Azure Container Apps Deployment
 
 ## Topology
 
-The student-credit deployment is deliberately smaller than the target
-multi-service architecture:
+The cost-optimized student deployment uses managed, scale-to-zero application
+compute:
 
 ```text
 GitHub Actions
@@ -12,145 +12,118 @@ GitHub Actions
     v
 Azure Container Registry
     |
-    | VM managed identity pulls image
+    | user-assigned managed identity
     v
-Ubuntu B1s VM
-|-- Caddy :80/:443
-|-- linkd :8080, private
-`-- Redis :6379, private and disposable
+Azure Container Apps Consumption
+|-- tinyurl-migrate  manual one-shot job
+`-- tinyurl-api      HTTPS ingress, 0-3 replicas
           |
+          | private VNet + private DNS
           v
 Azure PostgreSQL Flexible Server B1ms
-private delegated subnet
 ```
 
-Postgres is managed and authoritative. Redis runs on the VM with a 128 MB
-memory limit, no persistence, and no host port. Losing the VM loses only
-rebuildable cache data and the stateless application.
+PostgreSQL remains authoritative. The deployed API uses PostgreSQL directly
+and sets `TINYURL_CACHE=none`; Redis remains an implemented architecture option
+for sustained redirect load, but a continuously running Redis instance is not
+cost-effective for this low-traffic demonstration.
 
-This topology is suitable for learning and a low-traffic demonstration. It is
-not the target high-availability architecture because the VM is one failure
-domain and one application replica.
+## Cost Model
 
-## Student Benefit And Cost Guardrails
+Container Apps Consumption can scale the API to zero replicas. The environment
+uses platform-managed ingress, so this deployment does not create a dedicated
+VM disk or Azure Public IP resource.
 
-Azure for Students currently advertises, for eligible new accounts:
+The retired VM topology incurred separate charges for:
 
-- 750 hours/month of B1s Linux VM usage for 12 months;
-- 750 hours/month of PostgreSQL Flexible Server B1ms, 32 GB storage, and
-  32 GB backup storage for 12 months;
-- one Standard Azure Container Registry with 100 GB storage for 12 months.
+- a Standard static public IPv4 address, billed until the IP resource is
+  deleted even when detached;
+- a provisioned Standard HDD OS disk;
+- compute beyond any applicable student allowance.
 
-Eligibility is subscription- and region-dependent. Free compute does not imply
-that public IPv4, disks, bandwidth, DNS, or excess usage is free.
-
-Before provisioning:
-
-1. Confirm the three benefits in Azure Portal's **Free services** page.
-2. Create a Cost Management budget alert.
-3. Use an eligible `Standard_B1s`, `Standard_B2ats_v2`, or
-   `Standard_B2pts_v2` VM, plus `Standard_B1ms`, 32 GB PostgreSQL storage,
-   and Standard LRS VM disk.
-4. Check Cost Analysis after 24 hours.
-5. Delete the resource group when the demonstration is no longer needed.
+PostgreSQL, ACR, Key Vault, network usage, and usage beyond Container Apps
+grants can still consume student credit. Check Cost Analysis and keep a budget
+alert enabled.
 
 ## Security Boundaries
 
-- Only VM ports `80` and `443` are public.
-- Port `22` is restricted to the administrator's current public CIDR.
-- Redis is reachable only on the Docker bridge network.
-- PostgreSQL uses a delegated private subnet and private DNS.
-- PostgreSQL credentials are stored in Azure Key Vault.
-- The VM accesses Key Vault and ACR with its system-assigned managed identity.
-- GitHub accesses Azure through a federated OIDC identity, not a client secret.
-- Caddy obtains and renews public TLS certificates after DNS points to the VM.
+- Container Apps terminates HTTPS and exposes only the application ingress.
+- PostgreSQL remains in its delegated private subnet.
+- Container Apps reaches PostgreSQL through a dedicated delegated `/27`
+  subnet and the existing private DNS zone.
+- The database URL remains in Azure Key Vault.
+- A user-assigned managed identity receives only `AcrPull` and
+  `Key Vault Secrets User`.
+- GitHub authenticates to Azure through federated OIDC, not a client secret.
+- Application authentication still uses the development `X-Owner-ID` model
+  and must be replaced before treating the management API as public.
 
 ## Infrastructure
 
-[`infra/azure/main.bicep`](../../infra/azure/main.bicep) declares:
+[`infra/azure/main.bicep`](../../infra/azure/main.bicep) defines the durable
+foundation: PostgreSQL, ACR, Key Vault, private DNS, and the VNet.
 
-- virtual network, VM subnet, and delegated PostgreSQL subnet;
-- network security group;
-- static public IP and Ubuntu B1s VM;
-- PostgreSQL Flexible Server B1ms and `tinyurl` database;
-- Standard ACR;
-- Key Vault and database URL secret;
-- VM managed-identity role assignments.
+[`infra/azure/container-apps.bicep`](../../infra/azure/container-apps.bicep)
+adds the application resources to that foundation:
 
-Required Bicep parameters:
+- delegated `container-apps` subnet at `10.20.3.0/27`;
+- Consumption workload-profile environment;
+- `tinyurl-api` container app with managed HTTPS and HTTP scaling from zero;
+- `tinyurl-migrate` manually triggered migration job;
+- user-assigned identity and narrow ACR/Key Vault role assignments.
 
-```text
-sshPublicKey
-sshSourceCidr
-postgresAdminPassword
+Provision against the immutable image already in ACR:
+
+```powershell
+$env:Path = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;$env:Path"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\infra\azure\provision-container-apps.ps1 `
+  -ImageTag <git-sha>
 ```
 
-Use a URL-safe PostgreSQL password because it is embedded in a connection URL.
+For a new environment, run
+[`provision-foundation.ps1`](../../infra/azure/provision-foundation.ps1) once,
+then run `provision-container-apps.ps1`. The foundation provisioner refuses to
+run when PostgreSQL already exists so it cannot unexpectedly rotate the live
+database password.
 
-## Runtime
+## Runtime Flow
 
-[`deploy/azure-vm/compose.yaml`](../../deploy/azure-vm/compose.yaml) runs Caddy,
-`linkd`, Redis, and an opt-in migration container.
-
-[`deploy/azure-vm/deploy.sh`](../../deploy/azure-vm/deploy.sh):
-
-1. logs into Azure using the VM identity;
-2. authenticates Docker to ACR;
-3. retrieves the database URL from Key Vault;
-4. pulls the immutable Git SHA image;
-5. runs migrations;
-6. starts Redis, `linkd`, and Caddy;
-7. waits for readiness.
-
-## DNS
-
-After infrastructure provisioning, create an `A` record:
+Each production deployment:
 
 ```text
-<chosen-subdomain> -> <vmPublicIP Bicep output>
+CI succeeds on main
+-> GitHub obtains a short-lived Azure OIDC token
+-> build and push tinyurl-linkd:<git-sha>
+-> update and run tinyurl-migrate
+-> wait for migration success
+-> update tinyurl-api to the same image
+-> Container Apps creates an immutable revision
+-> verify /readyz through managed HTTPS ingress
 ```
 
-Do not trigger the first CD run until public DNS resolves to that address.
-Caddy needs public port 80 or 443 reachability to issue the certificate.
-
-Before DNS is configured, deploy with:
-
-```text
-TINYURL_PUBLIC_URL=http://<vm-public-ip>
-```
-
-Later, change that GitHub variable to `https://<chosen-subdomain>` and deploy
-again after the DNS record resolves. The same Caddy configuration then obtains
-and renews the certificate.
+The app uses `minReplicas: 0` and `maxReplicas: 3`. Zero minimizes idle cost
+but introduces cold-start latency after an idle period. Set the minimum to one
+when latency matters more than idle cost.
 
 ## CI/CD
 
-CI runs on pull requests targeting `main` and pushes to `main`:
+Development and delivery flow:
 
 ```text
-go test -race ./...
-go vet ./...
-production Docker build
+dev -> pull request to main -> CI -> review -> merge
+                                      |
+                                      v
+                         successful main CI
+                                      |
+                                      v
+                           production deployment
 ```
 
-The initial CD workflow is manual:
-
-```text
-GitHub OIDC login
-build and push <registry>/tinyurl-linkd:<git-sha>
-install runtime files through Azure VM Run Command
-run migrations and deploy remotely
-verify https://<domain>/readyz
-```
-
-Development flow:
-
-```text
-dev -> pull request -> CI -> review -> merge to main
-```
-
-After the first manual deployment succeeds, add a `push` trigger for `main` to
-the CD workflow. Deployment must never trigger directly from `dev`.
+CI runs race-enabled tests, `go vet`, and a production image build. CD runs
+only after a successful `main` CI or a manual dispatch; it never deploys
+directly from `dev`.
 
 GitHub `production` environment secrets:
 
@@ -165,21 +138,27 @@ GitHub `production` environment variables:
 ```text
 AZURE_RESOURCE_GROUP
 AZURE_CONTAINER_REGISTRY
-AZURE_VM_NAME
-AZURE_KEY_VAULT
-TINYURL_PUBLIC_URL
+AZURE_CONTAINER_APP
+AZURE_MIGRATION_JOB
 ```
 
-Run
-[`bootstrap-github-oidc.ps1`](../../infra/azure/bootstrap-github-oidc.ps1)
-after infrastructure exists. It creates the federated identity and prints the
-three IDs to configure in GitHub.
+## DNS
+
+The platform hostname is immediately available over HTTPS:
+
+```text
+https://tinyurl-api.<environment>.<region>.azurecontainerapps.io
+```
+
+For a custom hostname, create the DNS records requested by Container Apps,
+bind the hostname, and use a free managed certificate. Then update
+`TINYURL_BASE_URL` on the container app so newly created links return the
+custom hostname.
 
 ## Operational Limitations
 
-- The VM is not highly available.
-- Redis is not shared across replicas.
-- OS and Docker patching remain our responsibility.
-- VM disk and public IPv4 may consume credit.
-- Application authentication still uses the development `X-Owner-ID` model.
-- Cache metrics, circuit breaker, tracing, and alerting remain backlog work.
+- Scale-to-zero creates cold-start latency.
+- Redis caching is disabled in this deployment.
+- Authentication, rate limiting, cache metrics, tracing, and alerts remain
+  backlog work.
+- The single-region database is still the authoritative regional dependency.

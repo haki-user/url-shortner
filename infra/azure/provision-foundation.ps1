@@ -1,26 +1,10 @@
 param(
     [string]$ResourceGroup = "tinyurl-student-rg",
-    [string]$Location = "centralindia",
-    [string]$Prefix = "tinyurl",
-    [string]$VmSize = "Standard_B1s",
-    [string]$SshPublicKeyPath = "$HOME\.ssh\id_ed25519.pub",
-    [string]$SshSourceCidr = ""
+    [string]$Location = "southeastasia",
+    [string]$Prefix = "tinyurl"
 )
 
 $ErrorActionPreference = "Stop"
-
-if (-not (Test-Path -LiteralPath $SshPublicKeyPath)) {
-    throw "SSH public key not found at $SshPublicKeyPath"
-}
-
-if ([string]::IsNullOrWhiteSpace($SshSourceCidr)) {
-    $publicIP = (
-        Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 10
-    ).Trim()
-    $SshSourceCidr = "$publicIP/32"
-}
-
-$sshPublicKey = (Get-Content -LiteralPath $SshPublicKeyPath -Raw).Trim()
 
 $randomBytes = [byte[]]::new(24)
 $randomNumberGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -39,7 +23,6 @@ $postgresPassword = (
 
 $requiredProviders = @(
     "Microsoft.Authorization",
-    "Microsoft.Compute",
     "Microsoft.ContainerRegistry",
     "Microsoft.DBforPostgreSQL",
     "Microsoft.KeyVault",
@@ -71,15 +54,25 @@ if ($resourceGroupExists -eq "false") {
     }
 }
 
+$existingPostgresCount = az postgres flexible-server list `
+    --resource-group $ResourceGroup `
+    --query "length(@)" `
+    --output tsv
+
+if ([int]$existingPostgresCount -gt 0) {
+    throw (
+        "The TinyURL foundation already exists in '$ResourceGroup'. " +
+        "Refusing to rotate its PostgreSQL password; use " +
+        "provision-container-apps.ps1 for application infrastructure."
+    )
+}
+
 $parameters = @{
     '$schema'      = "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#"
     contentVersion = "1.0.0.0"
     parameters     = @{
         location                  = @{ value = $Location }
         prefix                    = @{ value = $Prefix }
-        vmSize                    = @{ value = $VmSize }
-        sshPublicKey              = @{ value = $sshPublicKey }
-        sshSourceCidr             = @{ value = $SshSourceCidr }
         postgresAdminPassword     = @{ value = $postgresPassword }
     }
 }
@@ -111,13 +104,9 @@ finally {
 [pscustomobject]@{
     ResourceGroup           = $ResourceGroup
     Location                = $Location
-    VmName                  = $deployment.vmName.value
-    VmSize                  = $VmSize
-    VmPublicIP              = $deployment.vmPublicIP.value
     ContainerRegistry       = $deployment.registryName.value
     ContainerRegistryServer = $deployment.registryLoginServer.value
     KeyVault                = $deployment.keyVaultName.value
     PostgresServer          = $deployment.postgresServerName.value
     PostgresHost            = $deployment.postgresHost.value
-    SshSourceCidr           = $SshSourceCidr
 } | Format-List
