@@ -3,6 +3,7 @@ param(
     [string]$Location = "southeastasia",
     [string]$RegistryName = "tinyurl7yycx7ze3vtdu",
     [string]$KeyVaultName = "tinyurl-kv-7yycx7ze3vtdu",
+    [string]$CustomDomain = "tinyurl.haki-user.in",
     [Parameter(Mandatory = $true)]
     [string]$ImageTag
 )
@@ -42,14 +43,47 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $deployment = $deploymentJSON | ConvertFrom-Json
+$environmentName = $deployment.environmentName.value
+$applicationName = $deployment.applicationName.value
+
+if ($CustomDomain.Trim() -ne "") {
+    $certificateId = az containerapp env certificate list `
+        --resource-group $ResourceGroup `
+        --name $environmentName `
+        --query "[?properties.subjectName=='$CustomDomain'].id | [0]" `
+        --output tsv
+
+    if ($LASTEXITCODE -ne 0 -or $certificateId.Trim() -eq "") {
+        throw "Managed certificate for $CustomDomain was not found in $environmentName"
+    }
+
+    az containerapp hostname add `
+        --resource-group $ResourceGroup `
+        --name $applicationName `
+        --hostname $CustomDomain `
+        --output none
+
+    az containerapp hostname bind `
+        --resource-group $ResourceGroup `
+        --name $applicationName `
+        --hostname $CustomDomain `
+        --certificate $certificateId `
+        --output none
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to bind $CustomDomain to $applicationName"
+    }
+}
 
 [pscustomobject]@{
     ResourceGroup       = $ResourceGroup
-    Environment         = $deployment.environmentName.value
-    Application         = $deployment.applicationName.value
+    Environment         = $environmentName
+    Application         = $applicationName
     ApplicationURL      = $deployment.applicationURL.value
+    PlatformURL         = $deployment.platformURL.value
     MigrationJob        = $deployment.migrationJobName.value
     ManagedIdentity     = $deployment.managedIdentityName.value
+    Redis               = $deployment.redisName.value
     MinimumReplicas     = 0
-    RedirectCache       = "disabled in this cost-optimized deployment"
+    RedirectCache       = "private Redis Container App, one replica"
 } | Format-List

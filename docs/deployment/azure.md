@@ -16,23 +16,32 @@ Azure Container Registry
     v
 Azure Container Apps Consumption
 |-- tinyurl-migrate  manual one-shot job
+|-- tinyurl-redis    internal TCP, exactly one replica
 `-- tinyurl-api      HTTPS ingress, 0-3 replicas
           |
-          | private VNet + private DNS
+          | custom domain + managed TLS
           v
+    https://tinyurl.haki-user.in
+          | \
+          |  `-> private Redis cache
+          |
+          `-> private VNet + private DNS
+                    |
+                    v
 Azure PostgreSQL Flexible Server B1ms
 ```
 
-PostgreSQL remains authoritative. The deployed API uses PostgreSQL directly
-and sets `TINYURL_CACHE=none`; Redis remains an implemented architecture option
-for sustained redirect load, but a continuously running Redis instance is not
-cost-effective for this low-traffic demonstration.
+PostgreSQL remains authoritative. Redirect reads use a shared, private Redis
+Container App through the implemented versioned cache-aside resolver. Redis is
+disposable: it has no persistence, uses a 128 MB memory cap with `allkeys-lru`
+eviction, and can be rebuilt entirely from PostgreSQL.
 
 ## Cost Model
 
-Container Apps Consumption can scale the API to zero replicas. The environment
-uses platform-managed ingress, so this deployment does not create a dedicated
-VM disk or Azure Public IP resource.
+Container Apps Consumption can scale the API to zero replicas. Redis remains
+at one replica so shared cache state is available when the API wakes. The
+environment uses platform-managed ingress, so this deployment does not create
+a dedicated VM disk or Azure Public IP resource.
 
 The retired VM topology incurred separate charges for:
 
@@ -48,6 +57,7 @@ alert enabled.
 ## Security Boundaries
 
 - Container Apps terminates HTTPS and exposes only the application ingress.
+- `tinyurl.haki-user.in` is bound with an Azure-managed certificate.
 - PostgreSQL remains in its delegated private subnet.
 - Container Apps reaches PostgreSQL through a dedicated delegated `/27`
   subnet and the existing private DNS zone.
@@ -69,6 +79,7 @@ adds the application resources to that foundation:
 - delegated `container-apps` subnet at `10.20.3.0/27`;
 - Consumption workload-profile environment;
 - `tinyurl-api` container app with managed HTTPS and HTTP scaling from zero;
+- private `tinyurl-redis` app with internal TCP ingress and one replica;
 - `tinyurl-migrate` manually triggered migration job;
 - user-assigned identity and narrow ACR/Key Vault role assignments.
 
@@ -103,9 +114,28 @@ CI succeeds on main
 -> verify /readyz through managed HTTPS ingress
 ```
 
-The app uses `minReplicas: 0` and `maxReplicas: 3`. Zero minimizes idle cost
-but introduces cold-start latency after an idle period. Set the minimum to one
-when latency matters more than idle cost.
+The API uses `minReplicas: 0` and `maxReplicas: 3`. Zero minimizes idle cost
+but introduces cold-start latency after an idle period. Redis uses exactly one
+replica because scaling a stateful in-memory server to multiple independent
+replicas would not create a coherent shared cache.
+
+## Explicit Deployment Decisions
+
+| Area | Student deployment | Production-scale target |
+|---|---|---|
+| API minimum replicas | Zero; accepts cold starts | One or more warm replicas |
+| API maximum replicas | Three; cost guardrail | Load-tested limit with a database connection budget |
+| Redis | One disposable Container App | Azure Managed Redis with replication and Private Link |
+| PostgreSQL | Single B1ms, seven-day backups | Zone-redundant HA, tested restores and read replicas |
+| Logging | Application stdout only | Central logs, metrics, traces, alerts and retention |
+| Region | One | Multi-region redirect reads and regional failover |
+| Authentication | Temporary `X-Owner-ID` | Verified identity at the gateway or application boundary |
+| Rate limiting | Not implemented | Per-principal creation and management limits |
+| Domain | `tinyurl.haki-user.in` with managed TLS | Gateway-managed domain policy and certificate automation |
+
+These are deployment tradeoffs, not missing parts of the target system design.
+They must be revisited using measured traffic, latency, failure, and budget
+data.
 
 ## CI/CD
 
@@ -144,21 +174,29 @@ AZURE_MIGRATION_JOB
 
 ## DNS
 
-The platform hostname is immediately available over HTTPS:
+The live custom hostname is:
 
 ```text
-https://tinyurl-api.<environment>.<region>.azurecontainerapps.io
+https://tinyurl.haki-user.in
 ```
 
-For a custom hostname, create the DNS records requested by Container Apps,
-bind the hostname, and use a free managed certificate. Then update
-`TINYURL_BASE_URL` on the container app so newly created links return the
-custom hostname.
+The DNS records are:
+
+| Record | Value |
+|---|---|
+| `CNAME tinyurl.haki-user.in` | `tinyurl-api.ashyisland-4b5b4213.southeastasia.azurecontainerapps.io` |
+| `TXT asuid.tinyurl.haki-user.in` | Container Apps custom domain verification id |
+
+Container Apps binds the hostname with an Azure-managed certificate and SNI.
+The application deployment sets
+`TINYURL_BASE_URL=https://tinyurl.haki-user.in`, so newly created links return
+the custom hostname.
 
 ## Operational Limitations
 
 - Scale-to-zero creates cold-start latency.
-- Redis caching is disabled in this deployment.
+- Redis is single-replica and disposable rather than managed or highly
+  available.
 - Authentication, rate limiting, cache metrics, tracing, and alerts remain
   backlog work.
 - The single-region database is still the authoritative regional dependency.
