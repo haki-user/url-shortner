@@ -21,6 +21,12 @@ param customDomain string = 'tinyurl.haki-user.in'
 @description('Short lowercase prefix used in resource names.')
 param prefix string = 'tinyurl'
 
+@description('When true, deploy a private Redis Container App. Keep false when using the utility VM Redis to avoid duplicate Redis cost.')
+param deployRedisContainerApp bool = false
+
+@description('Redis connection URL used when deployRedisContainerApp is false.')
+param redisURL string = 'redis://10.20.4.4:6379'
+
 var environmentName = '${prefix}-environment'
 var applicationName = '${prefix}-api'
 var redisName = '${prefix}-redis'
@@ -38,6 +44,7 @@ var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
   '4633458b-17de-408a-b874-0445c86b69e6'
 )
+var effectiveRedisURL = deployRedisContainerApp ? 'redis://${redisApp!.properties.configuration.ingress.fqdn}:6379' : redisURL
 
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
   name: virtualNetworkName
@@ -109,7 +116,7 @@ resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2024-03-01'
   }
 }
 
-resource redisApp 'Microsoft.App/containerApps@2024-03-01' = {
+resource redisApp 'Microsoft.App/containerApps@2024-03-01' = if (deployRedisContainerApp) {
   name: redisName
   location: location
   identity: {
@@ -313,7 +320,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'TINYURL_REDIS_URL'
-              value: 'redis://${redisApp.properties.configuration.ingress.fqdn}:6379'
+              value: effectiveRedisURL
             }
             {
               name: 'TINYURL_ADDR'
@@ -384,4 +391,4 @@ output platformURL string = 'https://${containerApp.properties.configuration.ing
 output environmentName string = containerAppsEnvironment.name
 output migrationJobName string = migrationJob.name
 output managedIdentityName string = containerIdentity.name
-output redisName string = redisApp.name
+output redisURL string = effectiveRedisURL
