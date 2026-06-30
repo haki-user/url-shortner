@@ -1048,6 +1048,80 @@ transactions and constraints provide part of that protection.
 - Wrap the primary cause with `%w`. Use `errors.Join` when multiple errors must
   remain programmatically inspectable.
 
+## Why Do Health Endpoints Not Return Every Dependency Detail?
+
+Health endpoints are usually consumed by infrastructure, not humans. If a
+platform probe gets a failure status, it may stop routing traffic to the
+instance or restart it. Therefore each endpoint must answer a narrow question:
+
+```text
+/healthz
+    Is the process alive?
+
+/readyz
+    Should traffic be routed here?
+
+/internal/diagnostics
+    What do dependencies look like right now?
+```
+
+`/healthz` stays shallow. It does not ping Postgres or Redis because a
+dependency outage does not mean the process itself is dead.
+
+`/readyz` checks only **required** dependencies. In our current deployment,
+Postgres is required because it is the source of truth. If Postgres is down,
+new cache misses and management operations cannot be served correctly, so the
+instance should report `503`.
+
+Redis is intentionally not part of readiness. It is a disposable cache:
+
+```text
+Redis down
+    |
+    v
+fall back to Postgres
+    |
+    v
+service still works, just slower and with more source load
+```
+
+If `/readyz` failed when Redis was down, Azure could remove a still-useful app
+instance from rotation. That would make an optional-cache failure behave like a
+hard outage.
+
+So we added `/internal/diagnostics` for human/operator detail. It reports each
+component's status, whether it is required, and the ping latency:
+
+```json
+{
+  "status": "degraded",
+  "checks": {
+    "postgres": {
+      "status": "ok",
+      "required": true,
+      "latencyMs": 4
+    },
+    "redis": {
+      "status": "error",
+      "required": false,
+      "latencyMs": 1,
+      "error": "connection refused"
+    }
+  }
+}
+```
+
+The endpoint is protected with `TINYURL_DIAGNOSTICS_TOKEN` because dependency
+names, failure messages, and latency are infrastructure details. Public probes
+should remain boring and low-information.
+
+Interview framing:
+
+> Liveness is process health. Readiness is traffic eligibility. Diagnostics is
+> operator detail. I keep Redis out of readiness because it is an optional
+> cache, but I still expose its ping and latency through a protected
+> diagnostics endpoint.
+
 ## Topics to Revisit
 
 - Slices, maps, and their reference-like behavior.

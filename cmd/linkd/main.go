@@ -34,13 +34,15 @@ type storageDependencies struct {
 	idempotencyStore  linkports.IdempotencyStore
 	analyticsRecorder analyticsports.RedirectEventRecorder
 	readinessChecker  health.Checker
+	diagnostics       []health.ComponentCheck
 	cleanup           func()
 }
 
 type resolverDependencies struct {
-	resolver   linkports.LinkResolver
-	repository linkports.LinkRepository
-	cleanup    func()
+	resolver    linkports.LinkResolver
+	repository  linkports.LinkRepository
+	diagnostics []health.ComponentCheck
+	cleanup     func()
 }
 
 func main() {
@@ -116,11 +118,21 @@ func run() error {
 		changeLinkExpiration,
 	)
 
-	healthHandler := health.NewHandler(storage.readinessChecker)
+	diagnostics := append(
+		[]health.ComponentCheck{},
+		storage.diagnostics...,
+	)
+	diagnostics = append(diagnostics, resolverDependencies.diagnostics...)
+	healthHandler := health.NewHandler(
+		storage.readinessChecker,
+		diagnostics,
+		cfg.DiagnosticsToken,
+	)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler.Liveness)
 	mux.HandleFunc("GET /readyz", healthHandler.Readiness)
+	mux.HandleFunc("GET /internal/diagnostics", healthHandler.Diagnostics)
 	mux.HandleFunc("GET /v1/links/{code}", managementHandler.Get)
 	mux.HandleFunc("PATCH /v1/links/{code}", managementHandler.Patch)
 	mux.Handle("/", linkHandler)
@@ -191,15 +203,24 @@ func buildStorage(
 	case config.StorageMemory:
 		log.Println("using memory storage")
 
+		memoryChecker := health.CheckerFunc(
+			func(context.Context) error {
+				return nil
+			},
+		)
+
 		return storageDependencies{
 			repository:        linkmemory.NewRepository(),
 			idempotencyStore:  linkmemory.NewIdempotencyStore(),
 			analyticsRecorder: analyticsmemory.NewRedirectEventRecorder(),
-			readinessChecker: health.CheckerFunc(
-				func(context.Context) error {
-					return nil
+			readinessChecker:  memoryChecker,
+			diagnostics: []health.ComponentCheck{
+				{
+					Name:     "memory",
+					Required: true,
+					Checker:  memoryChecker,
 				},
-			),
+			},
 			cleanup: func() {},
 		}, nil
 
@@ -222,12 +243,21 @@ func buildStorage(
 			)
 		}
 
+		postgresChecker := health.CheckerFunc(pool.Ping)
+
 		return storageDependencies{
 			repository:        linkpostgres.NewRepository(pool),
 			idempotencyStore:  linkpostgres.NewIdempotencyStore(pool),
 			analyticsRecorder: analyticspostgres.NewRedirectEventRecorder(pool),
-			readinessChecker:  health.CheckerFunc(pool.Ping),
-			cleanup:           pool.Close,
+			readinessChecker:  postgresChecker,
+			diagnostics: []health.ComponentCheck{
+				{
+					Name:     "postgres",
+					Required: true,
+					Checker:  postgresChecker,
+				},
+			},
+			cleanup: pool.Close,
 		}, nil
 
 	default:
@@ -250,9 +280,10 @@ func buildLinkResolver(
 		log.Println("redirect cache disabled")
 
 		return resolverDependencies{
-			resolver:   source,
-			repository: repository,
-			cleanup:    func() {},
+			resolver:    source,
+			repository:  repository,
+			diagnostics: nil,
+			cleanup:     func() {},
 		}, nil
 
 	case config.CacheRedis:
@@ -312,6 +343,17 @@ func buildLinkResolver(
 		return resolverDependencies{
 			resolver:   resolver,
 			repository: refreshingRepository,
+			diagnostics: []health.ComponentCheck{
+				{
+					Name:     "redis",
+					Required: false,
+					Checker: health.CheckerFunc(
+						func(ctx context.Context) error {
+							return client.Ping(ctx).Err()
+						},
+					),
+				},
+			},
 			cleanup: func() {
 				_ = client.Close()
 			},

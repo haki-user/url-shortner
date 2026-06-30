@@ -155,6 +155,10 @@ Rules:
 Redis is not checked by `/readyz`. The source of truth remains the required
 dependency.
 
+When Redis is configured, `/internal/diagnostics` still pings Redis and reports
+latency. That endpoint is protected and informational; Redis failure should be
+visible to operators without becoming a routing decision.
+
 ## Operational Defaults
 
 | Variable | Default |

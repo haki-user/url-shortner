@@ -33,6 +33,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ShutdownTimeout != 10*time.Second {
 		t.Fatalf("expected shutdown timeout %v, got %v", 10*time.Second, cfg.ShutdownTimeout)
 	}
+
+	if cfg.DiagnosticsToken != "" {
+		t.Fatalf("expected empty diagnostics token, got %q", cfg.DiagnosticsToken)
+	}
 }
 
 func TestLoadPostgresWithDatabaseURL(t *testing.T) {
@@ -156,6 +160,21 @@ func TestLoadCustomAddressAndBaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadDiagnosticsToken(t *testing.T) {
+	clearConfigEnv(t)
+
+	t.Setenv("TINYURL_DIAGNOSTICS_TOKEN", "  secret-token  ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if cfg.DiagnosticsToken != "secret-token" {
+		t.Fatalf("expected trimmed diagnostics token, got %q", cfg.DiagnosticsToken)
+	}
+}
+
 func TestLoadRemovesTrailingSlashFromBaseURL(t *testing.T) {
 	clearConfigEnv(t)
 
@@ -268,4 +287,5 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("TINYURL_ADDR", "")
 	t.Setenv("TINYURL_BASE_URL", "")
 	t.Setenv("TINYURL_SHUTDOWN_TIMEOUT", "")
+	t.Setenv("TINYURL_DIAGNOSTICS_TOKEN", "")
 }
