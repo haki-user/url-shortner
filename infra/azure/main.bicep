@@ -21,7 +21,7 @@ var networkName = '${prefix}-vnet'
 var registryName = take('${compactPrefix}${suffix}', 50)
 var postgresServerName = take('${compactPrefix}-pg-${suffix}', 63)
 var keyVaultName = take('${compactPrefix}-kv-${suffix}', 24)
-var postgresPrivateDnsZoneName = 'privatelink.postgres.database.azure.com'
+var postgresPrivateDnsZoneName = '${postgresServerName}.private.postgres.database.azure.com'
 
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   name: networkName
