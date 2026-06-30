@@ -114,6 +114,19 @@ func (f *handlerAnalyticsRecorderFake) Record(
 	return f.err
 }
 
+type handlerMetricsFake struct {
+	redirectResults  []string
+	analyticsResults []string
+}
+
+func (f *handlerMetricsFake) RecordRedirect(result string, duration time.Duration) {
+	f.redirectResults = append(f.redirectResults, result)
+}
+
+func (f *handlerMetricsFake) RecordAnalytics(result string, duration time.Duration) {
+	f.analyticsResults = append(f.analyticsResults, result)
+}
+
 func TestHandlerPostLinksSuccessReturnsCreatedJSON(t *testing.T) {
 	now := time.Date(2026, 6, 14, 22, 10, 0, 0, time.UTC)
 
@@ -244,6 +257,70 @@ func TestHandlerGetMissingCodeReturnsNotFound(t *testing.T) {
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, response.Code)
 	}
+}
+
+func TestHandlerGetCodeRecordsMetrics(t *testing.T) {
+	now := time.Date(2026, 6, 14, 22, 10, 0, 0, time.UTC)
+	link := mustNewHandlerTestLink(t, "abc123", "https://example.com", now, nil)
+
+	repository := &handlerRepositoryFake{link: link}
+	generator := handlerCodeGeneratorFake{code: "unused"}
+	clock := handlerClockFake{now: now}
+	analyticsRecorder := &handlerAnalyticsRecorderFake{}
+	metrics := &handlerMetricsFake{}
+
+	handler := NewHandler(
+		application.NewCreateGeneratedLink(repository, generator, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
+		"http://localhost:8080",
+		WithAnalytics(analyticsRecorder, clock),
+		WithMetrics(metrics),
+	)
+
+	request := httptest.NewRequest(http.MethodGet, "/abc123", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusFound {
+		t.Fatalf("expected status %d, got %d", http.StatusFound, response.Code)
+	}
+
+	assertHandlerStringSlice(t, metrics.redirectResults, []string{"success"})
+	assertHandlerStringSlice(t, metrics.analyticsResults, []string{"success"})
+}
+
+func TestHandlerGetMissingCodeRecordsNotFoundMetric(t *testing.T) {
+	now := time.Date(2026, 6, 14, 22, 10, 0, 0, time.UTC)
+
+	repository := &handlerRepositoryFake{findErr: ports.ErrLinkNotFound}
+	generator := handlerCodeGeneratorFake{code: "unused"}
+	clock := handlerClockFake{now: now}
+	metrics := &handlerMetricsFake{}
+
+	handler := NewHandler(
+		application.NewCreateGeneratedLink(repository, generator, clock),
+		application.NewRedirectLink(
+			application.NewRepositoryResolver(repository),
+			clock,
+		),
+		"http://localhost:8080",
+		WithMetrics(metrics),
+	)
+
+	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, response.Code)
+	}
+
+	assertHandlerStringSlice(t, metrics.redirectResults, []string{"not_found"})
 }
 
 func TestHandlerPostLinksWithIdempotencyKeyPassesKeyToCreateUseCase(t *testing.T) {
@@ -555,4 +632,18 @@ func mustNewHandlerTestLink(
 	}
 
 	return link
+}
+
+func assertHandlerStringSlice(t *testing.T, actual []string, expected []string) {
+	t.Helper()
+
+	if len(actual) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, actual)
+	}
+
+	for index := range expected {
+		if actual[index] != expected[index] {
+			t.Fatalf("expected %v, got %v", expected, actual)
+		}
+	}
 }

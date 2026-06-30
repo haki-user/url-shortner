@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,20 @@ type RedirectCacheConfig struct {
 	InactiveTTL      time.Duration
 }
 
+type RedirectCacheMetrics interface {
+	RecordCacheGet(result string, duration time.Duration)
+	RecordSourceLookup(result string, duration time.Duration)
+	RecordCachePut(result string, duration time.Duration)
+}
+
+type RedirectCacheOption func(*CacheAsideResolver)
+
+func WithRedirectCacheMetrics(metrics RedirectCacheMetrics) RedirectCacheOption {
+	return func(r *CacheAsideResolver) {
+		r.metrics = metrics
+	}
+}
+
 // CacheAsideResolver reads redirect mappings from cache and falls back to an
 // authoritative resolver on cache miss or failure.
 type CacheAsideResolver struct {
@@ -24,6 +39,7 @@ type CacheAsideResolver struct {
 	operationTimeout time.Duration
 	activeTTL        time.Duration
 	inactiveTTL      time.Duration
+	metrics          RedirectCacheMetrics
 }
 
 func NewCacheAsideResolver(
@@ -31,19 +47,26 @@ func NewCacheAsideResolver(
 	source ports.LinkResolver,
 	clock ports.Clock,
 	config RedirectCacheConfig,
+	options ...RedirectCacheOption,
 ) (CacheAsideResolver, error) {
 	if err := validateRedirectCacheConfig(config); err != nil {
 		return CacheAsideResolver{}, err
 	}
 
-	return CacheAsideResolver{
+	resolver := CacheAsideResolver{
 		cache:            cache,
 		source:           source,
 		clock:            clock,
 		operationTimeout: config.OperationTimeout,
 		activeTTL:        config.ActiveTTL,
 		inactiveTTL:      config.InactiveTTL,
-	}, nil
+	}
+
+	for _, option := range options {
+		option(&resolver)
+	}
+
+	return resolver, nil
 }
 
 func (r CacheAsideResolver) Resolve(
@@ -55,17 +78,28 @@ func (r CacheAsideResolver) Resolve(
 		r.operationTimeout,
 	)
 
+	cacheReadStartedAt := time.Now()
 	mapping, err := r.cache.Get(cacheCtx, code)
 	cancelCacheRead()
 
 	if err == nil {
+		r.recordCacheGet("hit", time.Since(cacheReadStartedAt))
 		return mapping, nil
 	}
 
+	cacheGetResult := "error"
+	if errors.Is(err, ports.ErrRedirectCacheMiss) {
+		cacheGetResult = "miss"
+	}
+	r.recordCacheGet(cacheGetResult, time.Since(cacheReadStartedAt))
+
+	sourceStartedAt := time.Now()
 	mapping, err = r.source.Resolve(ctx, code)
 	if err != nil {
+		r.recordSourceLookup("error", time.Since(sourceStartedAt))
 		return domain.RedirectMapping{}, err
 	}
+	r.recordSourceLookup("success", time.Since(sourceStartedAt))
 
 	ttl, shouldCache := redirectCacheTTL(
 		mapping,
@@ -74,6 +108,7 @@ func (r CacheAsideResolver) Resolve(
 		r.inactiveTTL,
 	)
 	if !shouldCache {
+		r.recordCachePut("skipped", 0)
 		return mapping, nil
 	}
 
@@ -83,9 +118,39 @@ func (r CacheAsideResolver) Resolve(
 	)
 	defer cancelCacheWrite()
 
-	_ = r.cache.PutIfNewer(cacheCtx, mapping, ttl)
+	cacheWriteStartedAt := time.Now()
+	if err := r.cache.PutIfNewer(cacheCtx, mapping, ttl); err != nil {
+		r.recordCachePut("error", time.Since(cacheWriteStartedAt))
+		return mapping, nil
+	}
+
+	r.recordCachePut("success", time.Since(cacheWriteStartedAt))
 
 	return mapping, nil
+}
+
+func (r CacheAsideResolver) recordCacheGet(result string, duration time.Duration) {
+	if r.metrics == nil {
+		return
+	}
+
+	r.metrics.RecordCacheGet(result, duration)
+}
+
+func (r CacheAsideResolver) recordSourceLookup(result string, duration time.Duration) {
+	if r.metrics == nil {
+		return
+	}
+
+	r.metrics.RecordSourceLookup(result, duration)
+}
+
+func (r CacheAsideResolver) recordCachePut(result string, duration time.Duration) {
+	if r.metrics == nil {
+		return
+	}
+
+	r.metrics.RecordCachePut(result, duration)
 }
 
 func validateRedirectCacheConfig(config RedirectCacheConfig) error {

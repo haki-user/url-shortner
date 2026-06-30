@@ -62,6 +62,24 @@ func (f cacheAsideClockFake) Now() time.Time {
 	return f.now
 }
 
+type cacheAsideMetricsFake struct {
+	cacheGetResults     []string
+	sourceLookupResults []string
+	cachePutResults     []string
+}
+
+func (f *cacheAsideMetricsFake) RecordCacheGet(result string, duration time.Duration) {
+	f.cacheGetResults = append(f.cacheGetResults, result)
+}
+
+func (f *cacheAsideMetricsFake) RecordSourceLookup(result string, duration time.Duration) {
+	f.sourceLookupResults = append(f.sourceLookupResults, result)
+}
+
+func (f *cacheAsideMetricsFake) RecordCachePut(result string, duration time.Duration) {
+	f.cachePutResults = append(f.cachePutResults, result)
+}
+
 func TestCacheAsideResolverHitReturnsCachedMapping(t *testing.T) {
 	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
 	cached := mustCacheAsideMapping(t, "https://cached.example", domain.Active, nil, 8)
@@ -87,6 +105,34 @@ func TestCacheAsideResolverHitReturnsCachedMapping(t *testing.T) {
 	if cache.putCalls != 0 {
 		t.Fatalf("expected cache not to be written on hit, got %d writes", cache.putCalls)
 	}
+}
+
+func TestCacheAsideResolverRecordsMetrics(t *testing.T) {
+	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	sourceMapping := mustCacheAsideMapping(
+		t,
+		"https://source.example",
+		domain.Active,
+		nil,
+		9,
+	)
+
+	cache := &cacheAsideCacheFake{
+		getErr: ports.ErrRedirectCacheMiss,
+	}
+	source := &cacheAsideSourceFake{mapping: sourceMapping}
+	metrics := &cacheAsideMetricsFake{}
+
+	resolver := mustCacheAsideResolverWithMetrics(t, cache, source, now, metrics)
+
+	_, err := resolver.Resolve(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	assertStringSlice(t, metrics.cacheGetResults, []string{"miss"})
+	assertStringSlice(t, metrics.sourceLookupResults, []string{"success"})
+	assertStringSlice(t, metrics.cachePutResults, []string{"success"})
 }
 
 func TestCacheAsideResolverMissOrFailureFallsBackAndFillsCache(t *testing.T) {
@@ -223,6 +269,23 @@ func mustCacheAsideResolver(
 ) CacheAsideResolver {
 	t.Helper()
 
+	return mustCacheAsideResolverWithMetrics(t, cache, source, now, nil)
+}
+
+func mustCacheAsideResolverWithMetrics(
+	t *testing.T,
+	cache ports.RedirectCache,
+	source ports.LinkResolver,
+	now time.Time,
+	metrics RedirectCacheMetrics,
+) CacheAsideResolver {
+	t.Helper()
+
+	options := []RedirectCacheOption{}
+	if metrics != nil {
+		options = append(options, WithRedirectCacheMetrics(metrics))
+	}
+
 	resolver, err := NewCacheAsideResolver(
 		cache,
 		source,
@@ -232,12 +295,27 @@ func mustCacheAsideResolver(
 			ActiveTTL:        60 * time.Second,
 			InactiveTTL:      30 * time.Second,
 		},
+		options...,
 	)
 	if err != nil {
 		t.Fatalf("expected resolver setup to succeed, got %v", err)
 	}
 
 	return resolver
+}
+
+func assertStringSlice(t *testing.T, actual []string, expected []string) {
+	t.Helper()
+
+	if len(actual) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, actual)
+	}
+
+	for index := range expected {
+		if actual[index] != expected[index] {
+			t.Fatalf("expected %v, got %v", expected, actual)
+		}
+	}
 }
 
 func mustCacheAsideMapping(

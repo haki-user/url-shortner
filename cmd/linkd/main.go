@@ -24,6 +24,7 @@ import (
 	"tinyurl/internal/link/adapters/system"
 	"tinyurl/internal/link/application"
 	linkports "tinyurl/internal/link/ports"
+	"tinyurl/internal/metrics"
 	storagepostgres "tinyurl/internal/storage/postgres"
 
 	redisclient "github.com/redis/go-redis/v9"
@@ -69,6 +70,7 @@ func run() error {
 
 	generator := codegen.NewBase62Generator()
 	clock := system.SystemClock{}
+	metricsRecorder := metrics.NewRecorder()
 
 	// main is the composition root: it constructs concrete infrastructure
 	// dependencies and injects them into application components through interfaces.
@@ -76,6 +78,7 @@ func run() error {
 		cfg,
 		storage.repository,
 		clock,
+		metricsRecorder,
 	)
 	if err != nil {
 		return fmt.Errorf("build link resolver: %w", err)
@@ -110,6 +113,7 @@ func run() error {
 		redirectLink,
 		cfg.BaseURL,
 		httpapi.WithAnalytics(storage.analyticsRecorder, clock),
+		httpapi.WithMetrics(metricsRecorder),
 	)
 	managementHandler := httpapi.NewManagementHandler(
 		getManagedLink,
@@ -128,11 +132,13 @@ func run() error {
 		diagnostics,
 		cfg.DiagnosticsToken,
 	)
+	metricsHandler := metrics.NewHandler(metricsRecorder, cfg.DiagnosticsToken)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthHandler.Liveness)
 	mux.HandleFunc("GET /readyz", healthHandler.Readiness)
 	mux.HandleFunc("GET /internal/diagnostics", healthHandler.Diagnostics)
+	mux.Handle("GET /internal/metrics", metricsHandler)
 	mux.HandleFunc("GET /v1/links/{code}", managementHandler.Get)
 	mux.HandleFunc("PATCH /v1/links/{code}", managementHandler.Patch)
 	mux.Handle("/", linkHandler)
@@ -272,6 +278,7 @@ func buildLinkResolver(
 	cfg config.Config,
 	repository linkports.LinkRepository,
 	clock linkports.Clock,
+	metricsRecorder application.RedirectCacheMetrics,
 ) (resolverDependencies, error) {
 	source := application.NewRepositoryResolver(repository)
 
@@ -311,6 +318,7 @@ func buildLinkResolver(
 			source,
 			clock,
 			cacheConfig,
+			application.WithRedirectCacheMetrics(metricsRecorder),
 		)
 		if err != nil {
 			_ = client.Close()

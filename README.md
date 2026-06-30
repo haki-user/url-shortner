@@ -138,6 +138,8 @@ and a production image build before deploying successful `main` revisions.
 - `GET /internal/diagnostics` is a protected diagnostic view. It is disabled
   unless `TINYURL_DIAGNOSTICS_TOKEN` is set, then requires
   `Authorization: Bearer <token>` or `X-Diagnostics-Token: <token>`.
+- `GET /internal/metrics` is a protected in-memory metrics snapshot using the
+  same token. It reports counters and latency histograms from this process.
 
 Readiness checks have a two-second timeout. Health responses use
 `Cache-Control: no-store` so infrastructure does not reuse stale probe results.
@@ -166,6 +168,32 @@ Example diagnostics response:
   }
 }
 ```
+
+Example metrics response:
+
+```json
+{
+  "status": "ok",
+  "counters": {
+    "redirect.requests.total": 10,
+    "redirect.requests.success": 9,
+    "cache.get.total": 9,
+    "cache.get.hit": 7,
+    "cache.get.miss": 2
+  },
+  "histograms": {
+    "redirect.latency": {
+      "count": 10,
+      "avgMs": 3.2,
+      "p95Ms": 10
+    }
+  }
+}
+```
+
+These metrics are intentionally local to the running service instance. They
+are useful for development and low-cost production learning; a later
+Prometheus/OpenTelemetry export can preserve the same signal names.
 
 ## Link Management
 
