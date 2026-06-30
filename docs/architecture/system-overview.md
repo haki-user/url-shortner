@@ -47,6 +47,7 @@ recording.
 | Versioned management reads and writes | Implemented |
 | Memory and Postgres adapters | Implemented |
 | Liveness, readiness, graceful shutdown | Implemented |
+| Protected dependency diagnostics | Implemented |
 | Redirect event recording | Implemented inline |
 | Versioned Redis redirect cache | Implemented; optional per deployment |
 | Azure Container Apps deployment | Implemented; scale-to-zero demo topology |
@@ -181,6 +182,29 @@ receives `412 Precondition Failed`.
 | Concurrent mutation | One succeeds; stale request gets `412` |
 | Graceful termination | Stop new traffic, drain, close resources |
 | Abrupt process loss | Database transactions and constraints preserve state |
+
+## Health And Diagnostics
+
+Health endpoints have deliberately different jobs:
+
+```text
+/healthz
+  process is alive; no dependency checks
+
+/readyz
+  required dependencies can serve traffic
+  Postgres required
+  Redis excluded
+
+/internal/diagnostics
+  protected operator view
+  Postgres ping + latency
+  Redis ping + latency when configured
+```
+
+Redis is not a readiness dependency because it is disposable cache state. A
+Redis outage should increase Postgres fallback traffic and show as degraded
+diagnostics, not remove otherwise working API instances from rotation.
 
 ## Security
 

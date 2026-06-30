@@ -36,6 +36,7 @@ jobs:
       MIGRATION_JOB_NAME: ${{ vars.AZURE_MIGRATION_JOB }}
       CUSTOM_DOMAIN: ${{ vars.TINYURL_CUSTOM_DOMAIN }}
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      DIAGNOSTICS_TOKEN: ${{ secrets.TINYURL_DIAGNOSTICS_TOKEN }}
 
     steps:
       - name: Check out repository
@@ -119,14 +120,32 @@ jobs:
           done
 
       - name: Deploy application revision
+        shell: bash
         run: |
+          set -euo pipefail
+
           image="$REGISTRY_NAME.azurecr.io/tinyurl-linkd:$IMAGE_TAG"
 
-          az containerapp update \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$CONTAINER_APP_NAME" \
-            --image "$image" \
-            --output none
+          if [ -n "${DIAGNOSTICS_TOKEN:-}" ]; then
+            az containerapp secret set \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$CONTAINER_APP_NAME" \
+              --secrets diagnostics-token="$DIAGNOSTICS_TOKEN" \
+              --output none
+
+            az containerapp update \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$CONTAINER_APP_NAME" \
+              --image "$image" \
+              --set-env-vars TINYURL_DIAGNOSTICS_TOKEN=secretref:diagnostics-token \
+              --output none
+          else
+            az containerapp update \
+              --resource-group "$RESOURCE_GROUP" \
+              --name "$CONTAINER_APP_NAME" \
+              --image "$image" \
+              --output none
+          fi
 
       - name: Bind custom hostname
         if: env.CUSTOM_DOMAIN != ''

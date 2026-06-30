@@ -27,6 +27,10 @@ param deployRedisContainerApp bool = false
 @description('Redis connection URL used when deployRedisContainerApp is false.')
 param redisURL string = 'redis://10.20.4.4:6379'
 
+@secure()
+@description('Optional token that enables the protected /internal/diagnostics endpoint. Leave empty to disable it.')
+param diagnosticsToken string = ''
+
 @description('Hard cost guardrail for public API scale-out. Keep at 1 for student deployment.')
 @minValue(1)
 param apiMaxReplicas int = 1
@@ -40,6 +44,18 @@ var image = '${registry.properties.loginServer}/tinyurl-linkd:${imageTag}'
 var redisImage = '${registry.properties.loginServer}/tinyurl-redis:7.4-alpine'
 var publicURL = 'https://${customDomain}'
 var databaseSecretURL = 'https://${keyVault.name}${environment().suffixes.keyvaultDns}/secrets/tinyurl-database-url'
+var diagnosticsSecrets = empty(diagnosticsToken) ? [] : [
+  {
+    name: 'diagnostics-token'
+    value: diagnosticsToken
+  }
+]
+var diagnosticsEnvironment = empty(diagnosticsToken) ? [] : [
+  {
+    name: 'TINYURL_DIAGNOSTICS_TOKEN'
+    secretRef: 'diagnostics-token'
+  }
+]
 var acrPullRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
   '7f951dda-4ed3-4680-a7ca-43fe172d538d'
@@ -296,20 +312,20 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           identity: containerIdentity.id
         }
       ]
-      secrets: [
+      secrets: concat([
         {
           name: 'database-url'
           keyVaultUrl: databaseSecretURL
           identity: containerIdentity.id
         }
-      ]
+      ], diagnosticsSecrets)
     }
     template: {
       containers: [
         {
           name: 'linkd'
           image: image
-          env: [
+          env: concat([
             {
               name: 'TINYURL_STORAGE'
               value: 'postgres'
@@ -334,7 +350,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'TINYURL_BASE_URL'
               value: publicURL
             }
-          ]
+          ], diagnosticsEnvironment)
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'

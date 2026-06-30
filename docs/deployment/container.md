@@ -80,6 +80,7 @@ The default image entrypoint is `/app/linkd`. Required production settings:
 | `TINYURL_REDIS_URL` | Managed Redis URL |
 | `TINYURL_ADDR` | `:8080` |
 | `TINYURL_BASE_URL` | Public HTTPS origin |
+| `TINYURL_DIAGNOSTICS_TOKEN` | Optional secret token for `/internal/diagnostics` |
 
 Keep database and Redis credentials in the provider's secret manager, not in
 the image or repository. Prefer TLS URLs required by the managed providers.
@@ -115,6 +116,27 @@ drain old instances with SIGTERM
 `linkd` handles `SIGTERM` with bounded graceful shutdown. Postgres is required
 for readiness; Redis failure degrades to Postgres fallback and does not make
 the instance unready.
+
+Detailed dependency diagnostics are intentionally separate from platform
+probes:
+
+```text
+GET /healthz                 public liveness, no dependency checks
+GET /readyz                  public readiness, required dependencies only
+GET /internal/diagnostics    protected details, disabled without token
+```
+
+Call diagnostics with either:
+
+```text
+Authorization: Bearer <TINYURL_DIAGNOSTICS_TOKEN>
+X-Diagnostics-Token: <TINYURL_DIAGNOSTICS_TOKEN>
+```
+
+Diagnostics may report Redis as `error` while returning HTTP `200` with
+`status: "degraded"`, because Redis is optional cache infrastructure. A
+required dependency such as Postgres returning `error` changes diagnostics to
+HTTP `503` with `status: "not_ready"`.
 
 ## Remaining Production Work
 

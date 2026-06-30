@@ -4,6 +4,7 @@ param(
     [string]$RegistryName = "tinyurl7yycx7ze3vtdu",
     [string]$KeyVaultName = "tinyurl-kv-7yycx7ze3vtdu",
     [string]$CustomDomain = "tinyurl.haki-user.in",
+    [string]$DiagnosticsToken = "",
     [Parameter(Mandatory = $true)]
     [string]$ImageTag
 )
@@ -36,6 +37,7 @@ $deploymentJSON = az deployment group create `
         registryName=$RegistryName `
         keyVaultName=$KeyVaultName `
         imageTag=$ImageTag `
+        diagnosticsToken=$DiagnosticsToken `
     --query properties.outputs
 
 if ($LASTEXITCODE -ne 0) {

@@ -33,6 +33,7 @@ type Config struct {
 	Addr                  string
 	BaseURL               string
 	ShutdownTimeout       time.Duration
+	DiagnosticsToken      string
 }
 
 func Load() (Config, error) {
@@ -93,6 +94,8 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("TINYURL_SHUTDOWN_TIMEOUT must be positive")
 	}
 
+	diagnosticsToken := strings.TrimSpace(os.Getenv("TINYURL_DIAGNOSTICS_TOKEN"))
+
 	cache := CacheMode(strings.ToLower(strings.TrimSpace(
 		os.Getenv("TINYURL_CACHE"),
 	)))
@@ -146,6 +149,7 @@ func Load() (Config, error) {
 		Addr:                  addr,
 		BaseURL:               baseURL,
 		ShutdownTimeout:       shutdownTimeout,
+		DiagnosticsToken:      diagnosticsToken,
 	}, nil
 }
 

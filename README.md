@@ -111,6 +111,7 @@ Location: https://example.com
 | `TINYURL_ADDR` | `:8080` | Address on which the HTTP server listens |
 | `TINYURL_BASE_URL` | `http://localhost:8080` | Public URL used when returning short links |
 | `TINYURL_SHUTDOWN_TIMEOUT` | `10s` | Maximum time allowed for graceful HTTP shutdown |
+| `TINYURL_DIAGNOSTICS_TOKEN` | none | Enables protected dependency diagnostics when set |
 
 Use [.env.example](.env.example) as a local configuration template. The Go
 service reads operating-system environment variables and does not automatically
@@ -134,11 +135,37 @@ and a production image build before deploying successful `main` revisions.
   serve HTTP and does not check external dependencies.
 - `GET /readyz` is a readiness check. It returns `200` when required storage is
   available and `503` when the service should not receive traffic.
+- `GET /internal/diagnostics` is a protected diagnostic view. It is disabled
+  unless `TINYURL_DIAGNOSTICS_TOKEN` is set, then requires
+  `Authorization: Bearer <token>` or `X-Diagnostics-Token: <token>`.
 
 Readiness checks have a two-second timeout. Health responses use
 `Cache-Control: no-store` so infrastructure does not reuse stale probe results.
 With Postgres storage, stopping Postgres leaves `/healthz` healthy while
 `/readyz` reports `503`; readiness recovers after Postgres reconnects.
+Redis is shown in diagnostics when configured, but it is optional and does not
+make readiness fail.
+
+Example diagnostics response:
+
+```json
+{
+  "status": "degraded",
+  "checks": {
+    "postgres": {
+      "status": "ok",
+      "required": true,
+      "latencyMs": 4
+    },
+    "redis": {
+      "status": "error",
+      "required": false,
+      "latencyMs": 1,
+      "error": "connection refused"
+    }
+  }
+}
+```
 
 ## Link Management
 
