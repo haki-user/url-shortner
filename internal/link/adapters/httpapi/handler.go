@@ -21,9 +21,15 @@ type Handler struct {
 	baseURL             string
 	analyticsRecorder   analyticsports.RedirectEventRecorder
 	clock               ports.Clock
+	metrics             MetricsRecorder
 }
 
 type HandlerOption func(*Handler)
+
+type MetricsRecorder interface {
+	RecordRedirect(result string, duration time.Duration)
+	RecordAnalytics(result string, duration time.Duration)
+}
 
 func WithAnalytics(
 	recorder analyticsports.RedirectEventRecorder,
@@ -32,6 +38,12 @@ func WithAnalytics(
 	return func(h *Handler) {
 		h.analyticsRecorder = recorder
 		h.clock = clock
+	}
+}
+
+func WithMetrics(recorder MetricsRecorder) HandlerOption {
+	return func(h *Handler) {
+		h.metrics = recorder
 	}
 }
 
@@ -106,18 +118,29 @@ func (h Handler) handleCreateLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) handleRedirect(w http.ResponseWriter, r *http.Request) {
+	startedAt := time.Now()
+	resultName := "error"
+	defer func() {
+		h.recordRedirectMetric(resultName, time.Since(startedAt))
+	}()
+
 	code := strings.TrimPrefix(r.URL.Path, "/")
 
 	result, err := h.redirectLink.Execute(r.Context(), application.RedirectLinkRequest{
 		Code: code,
 	})
 	if err != nil {
+		if errors.Is(err, ports.ErrLinkNotFound) || errors.Is(err, application.ErrLinkUnavailable) {
+			resultName = "not_found"
+		}
+
 		h.writeRedirectErr(w, err)
 		return
 	}
 
 	h.recordRedirectEvent(r, code)
 
+	resultName = "success"
 	http.Redirect(w, r, result.Destination, http.StatusFound)
 }
 
@@ -176,6 +199,7 @@ func writeJSON(w http.ResponseWriter, statusCode int, value any) {
 
 func (h Handler) recordRedirectEvent(r *http.Request, code string) {
 	if h.analyticsRecorder == nil || h.clock == nil {
+		h.recordAnalyticsMetric("skipped", 0)
 		return
 	}
 
@@ -187,10 +211,33 @@ func (h Handler) recordRedirectEvent(r *http.Request, code string) {
 		clientIPFromRequest(r),
 	)
 	if err != nil {
+		h.recordAnalyticsMetric("error", 0)
 		return
 	}
 
-	_ = h.analyticsRecorder.Record(r.Context(), event)
+	startedAt := time.Now()
+	if err := h.analyticsRecorder.Record(r.Context(), event); err != nil {
+		h.recordAnalyticsMetric("error", time.Since(startedAt))
+		return
+	}
+
+	h.recordAnalyticsMetric("success", time.Since(startedAt))
+}
+
+func (h Handler) recordRedirectMetric(result string, duration time.Duration) {
+	if h.metrics == nil {
+		return
+	}
+
+	h.metrics.RecordRedirect(result, duration)
+}
+
+func (h Handler) recordAnalyticsMetric(result string, duration time.Duration) {
+	if h.metrics == nil {
+		return
+	}
+
+	h.metrics.RecordAnalytics(result, duration)
 }
 
 func clientIPFromRequest(r *http.Request) string {

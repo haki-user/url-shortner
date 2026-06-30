@@ -48,6 +48,7 @@ recording.
 | Memory and Postgres adapters | Implemented |
 | Liveness, readiness, graceful shutdown | Implemented |
 | Protected dependency diagnostics | Implemented |
+| Protected in-process metrics | Implemented |
 | Redirect event recording | Implemented inline |
 | Versioned Redis redirect cache | Implemented; optional per deployment |
 | Azure Container Apps deployment | Implemented; scale-to-zero demo topology |
@@ -200,11 +201,20 @@ Health endpoints have deliberately different jobs:
   protected operator view
   Postgres ping + latency
   Redis ping + latency when configured
+
+/internal/metrics
+  protected service behavior view
+  redirect, cache, source, and analytics counters
+  latency histograms with approximate p50/p95/p99 buckets
 ```
 
 Redis is not a readiness dependency because it is disposable cache state. A
 Redis outage should increase Postgres fallback traffic and show as degraded
 diagnostics, not remove otherwise working API instances from rotation.
+
+Diagnostics answers "can I ping dependencies right now?" Metrics answers "what
+has the service actually been doing?" The second question is what proves cache
+hit rate, source fallback load, and redirect tail latency.
 
 ## Security
 
@@ -222,6 +232,10 @@ diagnostics, not remove otherwise working API instances from rotation.
 - Mutation conflicts and idempotency outcomes
 - Invalidation and analytics lag
 - Readiness and shutdown duration
+
+The first in-process metrics pass covers redirect, cache, source lookup, and
+analytics signals. It intentionally does not yet provide durable history,
+cross-replica aggregation, alerting, tracing, or dashboards.
 
 Do not use code, owner ID, or destination URL as metric labels.
 

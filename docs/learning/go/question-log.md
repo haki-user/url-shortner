@@ -1122,6 +1122,63 @@ Interview framing:
 > cache, but I still expose its ping and latency through a protected
 > diagnostics endpoint.
 
+## Why Add Metrics If Diagnostics Already Shows Latency?
+
+Diagnostics and metrics answer different questions.
+
+Diagnostics is a **right now ping**:
+
+```text
+Can the app reach Postgres right now?
+Can the app reach Redis right now?
+How long did that one ping take?
+```
+
+Metrics are **what happened during real requests**:
+
+```text
+How many redirects succeeded?
+How many short codes were missing/unavailable?
+How often did Redis hit, miss, or fail?
+How often did we fall back to Postgres?
+What are redirect p50/p95/p99 latency buckets?
+Did analytics recording fail?
+```
+
+That distinction matters because a Redis `PING` may be fast while Redis still
+does not help much if the cache hit rate is low. To answer "why Redis?" we need
+cache-hit and fallback metrics, not only dependency ping latency.
+
+The first implementation keeps metrics inside the service process:
+
+```text
+request happens
+    |
+    v
+service increments counters and observes durations in memory
+    |
+    v
+GET /internal/metrics returns a protected JSON snapshot
+```
+
+This is cheap and good for learning. It has limitations:
+
+- metrics reset when the process restarts or scales to zero;
+- each replica would have its own local metrics;
+- there is no historical dashboard or alerting;
+- it is not a replacement for Prometheus/OpenTelemetry later.
+
+For the current deployment, that tradeoff is correct because we want signal
+without adding paid infrastructure.
+
+Interview framing:
+
+> Diagnostics tells me whether dependencies are reachable. Metrics tells me
+> whether the design is working under real traffic. I would start with redirect
+> latency, cache hit/miss/error counts, source fallback counts, and analytics
+> failure counts. Later I would export the same signals to Prometheus or
+> OpenTelemetry for durable dashboards and alerts.
+
 ## Topics to Revisit
 
 - Slices, maps, and their reference-like behavior.

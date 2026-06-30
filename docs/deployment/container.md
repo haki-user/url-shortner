@@ -124,6 +124,7 @@ probes:
 GET /healthz                 public liveness, no dependency checks
 GET /readyz                  public readiness, required dependencies only
 GET /internal/diagnostics    protected details, disabled without token
+GET /internal/metrics        protected in-process counters and latency buckets
 ```
 
 Call diagnostics with either:
@@ -137,6 +138,24 @@ Diagnostics may report Redis as `error` while returning HTTP `200` with
 `status: "degraded"`, because Redis is optional cache infrastructure. A
 required dependency such as Postgres returning `error` changes diagnostics to
 HTTP `503` with `status: "not_ready"`.
+
+`/internal/metrics` is also protected by `TINYURL_DIAGNOSTICS_TOKEN`. It keeps
+metrics in memory inside each service instance:
+
+```text
+redirect.requests.total
+redirect.requests.success | not_found | error
+redirect.latency
+cache.get.hit | miss | error
+cache.put.success | skipped | error
+source.lookup.success | error
+analytics.record.success | skipped | error
+```
+
+Because the Container App can scale to zero, these metrics reset when an
+instance stops or a new revision starts. That is acceptable for the current
+low-cost phase. Durable time-series storage can be added later through
+Prometheus/OpenTelemetry without changing the service behavior.
 
 ## Remaining Production Work
 
